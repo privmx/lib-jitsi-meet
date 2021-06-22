@@ -34,6 +34,11 @@ export const CONNECTION_ERROR = 'conference.connectionError';
 export const CONFERENCE_RESTARTED = 'conference.restarted';
 
 /**
+ * Indicates that the client doesn't suport End-to-End Encryption.
+ */
+export const E2EE_NOT_SUPPORTED = 'conference.e2eeNotSupported';
+
+/**
  * Indicates that a connection error is due to not allowed,
  * occurred when trying to join a conference.
  */
