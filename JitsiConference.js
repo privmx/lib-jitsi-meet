@@ -2089,6 +2089,10 @@ JitsiConference.prototype._acceptJvbIncomingCall = function(
             localTracks
         );
 
+        // Enable or disable simulcast for plan-b screensharing based on the capture fps if it is set through the UI.
+        this._desktopSharingFrameRate
+            && jingleSession.peerconnection.setDesktopSharingFrameRate(this._desktopSharingFrameRate);
+
         // Start callstats as soon as peerconnection is initialized,
         // do not wait for XMPPEvents.PEERCONNECTION_READY, as it may never
         // happen in case if user doesn't have or denied permission to
@@ -3406,6 +3410,29 @@ JitsiConference.prototype.getP2PConnectionState = function() {
     return null;
 };
 
+/**
+ * Configures the peerconnection so that a given framre rate can be achieved for desktop share.
+ *
+ * @param {number} maxFps The capture framerate to be used for desktop tracks.
+ * @returns {boolean} true if the operation is successful, false otherwise.
+ */
+JitsiConference.prototype.setDesktopSharingFrameRate = function(maxFps) {
+    if (typeof maxFps !== 'number' || isNaN(maxFps)) {
+        logger.error(`Invalid value ${maxFps} specified for desktop capture frame rate`);
+
+        return false;
+    }
+
+    this._desktopSharingFrameRate = maxFps;
+
+    // Enable or disable simulcast for plan-b screensharing based on the capture fps.
+    this.jvbJingleSession && this.jvbJingleSession.peerconnection.setDesktopSharingFrameRate(maxFps);
+
+    // Set the capture rate for desktop sharing.
+    this.rtc.setDesktopSharingFrameRate(maxFps);
+
+    return true;
+};
 
 /**
  * Manually starts new P2P session (should be used only in the tests).
