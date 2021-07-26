@@ -264,8 +264,10 @@ export default class RTC extends Listenable {
                 logError(error, 'VideoTypeMessage', this._videoType);
             }
 
-            this.removeListener(RTCEvents.DATA_CHANNEL_OPEN, this._channelOpenListener);
-            this._channelOpenListener = null;
+            if (this._channelOpenListener) {
+                this.removeListener(RTCEvents.DATA_CHANNEL_OPEN, this._channelOpenListener);
+                this._channelOpenListener = null;
+            }
         };
         this.addListener(RTCEvents.DATA_CHANNEL_OPEN, this._channelOpenListener);
 
