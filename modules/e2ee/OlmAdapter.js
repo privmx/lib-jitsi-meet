@@ -91,17 +91,33 @@ export class OlmAdapter extends Listenable {
             const promises = [];
             const localParticipantId = this._conf.myUserId();
 
+            const failedParticipants = [];
             for (const participant of this._conf.getParticipants()) {
                 const participantFeatures = await participant.getFeatures();
 
                 if (participantFeatures.has(FEATURE_E2EE) && localParticipantId < participant.getId()) {
-                    promises.push(this._sendSessionInit(participant));
+                    const prom = this._sendSessionInit(participant);
+                    prom.catch(() => {
+                        failedParticipants.push(participant);
+                    });
+                    promises.push(prom);
                 }
             }
 
             await Promise.allSettled(promises);
 
-            // TODO: retry failed ones.
+            if (failedParticipants.length > 0) {
+                await new Promise(resolve => {
+                    setTimeout(() => {
+                        resolve();
+                    }, 1000);
+                });
+                const retryPromises = [];
+                for (const participant of failedParticipants) {
+                    retryPromises.push(this._sendSessionInit(participant));
+                }
+                await Promise.allSettled(retryPromises);
+            }
 
             this._sessionInitialization.resolve();
             this._sessionInitialization = undefined;
@@ -130,48 +146,98 @@ export class OlmAdapter extends Listenable {
         this._keyIndex++;
 
         // Broadcast it.
-        const promises = [];
+        const numberOfExtraAttempts = this._getKeyDistributionNumberOfExtraAttempts() ?? 0;
+        const maxNumberOfAttempts = Math.max(1, numberOfExtraAttempts);
+        let participants = this._conf.getParticipants();
+        for (let attemptId = 0; attemptId < maxNumberOfAttempts && participants.length > 0; ++attemptId) {
+            const result = await this._distributeKeyToParticipants(participants);
+            participants = result.failedParticipants;
+            await new Promise(resolve => {
+                setTimeout(() => {
+                   resolve(); 
+                }, 1000);
+            });
+        }
+    
+        return this._keyIndex;
+    }
 
-        for (const participant of this._conf.getParticipants()) {
-            const pId = participant.getId();
-            const olmData = this._getParticipantOlmData(participant);
+    /**
+     * Distributes current key to specified participants by sending a key-info message.
+     *
+     * @param {JitsiParticipant[]} participants - Participants to send key info to.
+     * @returns {Promise<{ succeededParticipants: JitsiParticipant[], failedParticipants: JitsiParticipant[] }>}
+     */
+    async _distributeKeyToParticipants(participants) {
+        const promises = [];
+        const succeededParticipants = [];
+        const failedParticipants = [];
+
+        for (const participant of participants) {
 
             // TODO: skip those who don't support E2EE.
-            if (!olmData.session) {
-                logger.warn(`Tried to send key to participant ${pId} but we have no session`);
 
-                // eslint-disable-next-line no-continue
-                continue;
-            }
-
-            const uuid = uuidv4();
-            const data = {
-                [JITSI_MEET_MUC_TYPE]: OLM_MESSAGE_TYPE,
-                olm: {
-                    type: OLM_MESSAGE_TYPES.KEY_INFO,
-                    data: {
-                        ciphertext: this._encryptKeyInfo(olmData.session),
-                        uuid
-                    }
-                }
-            };
-            const d = new Deferred();
-
-            d.setRejectTimeout(REQ_TIMEOUT);
-            d.catch(() => {
-                this._reqs.delete(uuid);
+            const p = this._distributeKeyToParticipant(participant);
+            p.then(() => {
+                succeededParticipants.push(participant);
             });
-            this._reqs.set(uuid, d);
-            promises.push(d);
-
-            this._sendMessage(data, pId);
+            p.catch(() => {
+                failedParticipants.push(participant);
+            });
+            promises.push(p);
         }
 
         await Promise.allSettled(promises);
 
-        // TODO: retry failed ones?
+        return {
+            succeededParticipants: succeededParticipants,
+            failedParticipants: failedParticipants,
+        };
+    }
 
-        return this._keyIndex;
+    /**
+     * Distributes current key to the specified participant by sending a key-info message.
+     *
+     * @param {JitsiParticipant} participant - Participant to send key info to.
+     * @returns {Promise<void>}
+     */
+    async _distributeKeyToParticipant(participant) {
+        const pId = participant.getId();
+        const olmData = this._getParticipantOlmData(participant);
+
+        if (this._getKeyDistributionWaitForPendingSessionUuid()) {
+            if (olmData.pendingSessionUuid) {
+                await this._reqs.get(olmData.pendingSessionUuid);
+            }
+        }
+
+        if (!olmData.session) {
+            logger.warn(`Tried to send key to participant ${pId} but we have no session`);
+            return Promise.reject();
+        }
+
+        const uuid = uuidv4();
+        const data = {
+            [JITSI_MEET_MUC_TYPE]: OLM_MESSAGE_TYPE,
+            olm: {
+                type: OLM_MESSAGE_TYPES.KEY_INFO,
+                data: {
+                    ciphertext: this._encryptKeyInfo(olmData.session),
+                    uuid
+                }
+            }
+        };
+    
+        const d = new Deferred();
+        d.setRejectTimeout(REQ_TIMEOUT);
+        d.catch(() => {
+            this._reqs.delete(uuid);
+        });
+        this._reqs.set(uuid, d);
+
+        this._sendMessage(data, pId);
+
+        return d.promise;
     }
 
     /**
@@ -610,6 +676,35 @@ export class OlmAdapter extends Listenable {
         olmData.pendingSessionUuid = uuid;
 
         return d;
+    }
+
+    _hasKeyDistributionConfig() {
+        if (!this._conf) { return false; }
+        if (!this._conf.options) { return false; }
+        if (!this._conf.options.config) { return false; }
+        if (!this._conf.options.config.e2ee) { return false; }
+        if (!this._conf.options.config.e2ee.keyDistribution) { return false; }
+        return true;
+    }
+
+    /**
+     * Returns configured number of extra key distribution attempts.
+     *
+     * @returns {number}
+     */
+    _getKeyDistributionNumberOfExtraAttempts() {
+        if (!this._hasKeyDistributionConfig()) { return 0; }
+        return this._conf.options.config.e2ee.keyDistribution.numberOfExtraAttempts;
+    }
+
+    /**
+     * Returns whether waiting for pending sessions to resolve before distributing key is set to true.
+     *
+     * @returns {boolean}
+     */
+    _getKeyDistributionWaitForPendingSessionUuid() {
+        if (!this._hasKeyDistributionConfig()) { return false; }
+        return this._conf.options.config.e2ee.keyDistribution.waitForPendingSessionUuid;
     }
 }
 

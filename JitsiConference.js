@@ -106,6 +106,11 @@ const JINGLE_SI_TIMEOUT = 5000;
  * "Math.random() < forceJVB121Ratio" will determine whether a 2 people
  * conference should be moved to the JVB instead of P2P. The decision is made on
  * the responder side, after ICE succeeds on the P2P connection.
+ * @param {number} [options.config.e2ee.keyDistribution.numberOfExtraAttempts]
+ * the number of extra key distribution attempts.
+ * @param {boolean} [options.config.e2ee.keyDistribution.waitForPendingSessionUuid]
+ * whether to wait for pendingSessionUuid to resolve before distributing the key to
+ * a participant.
  * @constructor
  *
  * FIXME Make all methods which are called from lib-internal classes
