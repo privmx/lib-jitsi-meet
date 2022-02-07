@@ -1,6 +1,6 @@
-/* global __filename */
+import { getLogger } from '@jitsi/logger';
 
-import { getLogger } from 'jitsi-meet-logger';
+import * as MediaType from '../../service/RTC/MediaType';
 
 import SDPUtil from './SDPUtil';
 import { parseSecondarySSRC, SdpTransformWrap } from './SdpTransformUtil';
@@ -101,7 +101,7 @@ export default class RtxModifier {
      */
     modifyRtxSsrcs(sdpStr) {
         const sdpTransformer = new SdpTransformWrap(sdpStr);
-        const videoMLine = sdpTransformer.selectMedia('video');
+        const videoMLine = sdpTransformer.selectMedia(MediaType.VIDEO)?.[0];
 
         if (!videoMLine) {
             logger.debug(`No 'video' media found in the sdp: ${sdpStr}`);
@@ -170,7 +170,7 @@ export default class RtxModifier {
      */
     stripRtx(sdpStr) {
         const sdpTransformer = new SdpTransformWrap(sdpStr);
-        const videoMLine = sdpTransformer.selectMedia('video');
+        const videoMLine = sdpTransformer.selectMedia(MediaType.VIDEO)?.[0];
 
         if (!videoMLine) {
             logger.debug(`No 'video' media found in the sdp: ${sdpStr}`);

@@ -1,10 +1,12 @@
 import { BrowserDetection } from '@jitsi/js-utils';
-import { getLogger } from 'jitsi-meet-logger';
+import { getLogger } from '@jitsi/logger';
 
 const logger = getLogger(__filename);
 
 /* Minimum required Chrome / Chromium version. This applies also to derivatives. */
 const MIN_REQUIRED_CHROME_VERSION = 72;
+const MIN_REQUIRED_SAFARI_VERSION = 14;
+const MIN_REQUIRED_IOS_VERSION = 14;
 
 // TODO: Move this code to js-utils.
 
@@ -26,14 +28,14 @@ export default class BrowserCapabilities extends BrowserDetection {
     }
 
     /**
-     * Tells whether or not the <tt>MediaStream/tt> is removed from
-     * the <tt>PeerConnection</tt> and disposed on video mute (in order to turn
-     * off the camera device).
-     * @return {boolean} <tt>true</tt> if the current browser supports this
-     * strategy or <tt>false</tt> otherwise.
+     * Tells whether or not the <tt>MediaStream/tt> is removed from the <tt>PeerConnection</tt> and disposed on video
+     * mute (in order to turn off the camera device). This is needed on Firefox because of the following bug
+     * https://bugzilla.mozilla.org/show_bug.cgi?id=1735951
+     *
+     * @return {boolean} <tt>true</tt> if the current browser supports this strategy or <tt>false</tt> otherwise.
      */
     doesVideoMuteByStreamRemove() {
-        return this.isChromiumBased() || this.isWebKitBased();
+        return this.isChromiumBased() || this.isWebKitBased() || this.isFirefox();
     }
 
     /**
@@ -54,6 +56,18 @@ export default class BrowserCapabilities extends BrowserDetection {
             || this.isNWJS()
             || this.isOpera())
             && !this.isWebKitBased();
+    }
+
+    /**
+     * Checks if the current platform is iOS.
+     *
+     * @returns {boolean}
+     */
+    isIosBrowser() {
+        const { userAgent, maxTouchPoints, platform } = navigator;
+
+        return Boolean(userAgent.match(/iP(ad|hone|od)/i))
+            || (maxTouchPoints && maxTouchPoints > 2 && /MacIntel/.test(platform));
     }
 
     /**
@@ -89,10 +103,30 @@ export default class BrowserCapabilities extends BrowserDetection {
      * @returns {boolean} true if the browser is supported, false otherwise.
      */
     isSupported() {
+        if (this.isSafari() && this._getSafariVersion() < MIN_REQUIRED_SAFARI_VERSION) {
+            return false;
+        }
+
         return (this.isChromiumBased() && this._getChromiumBasedVersion() >= MIN_REQUIRED_CHROME_VERSION)
             || this.isFirefox()
             || this.isReactNative()
             || this.isWebKitBased();
+    }
+
+    /**
+     * Returns whether the browser is supported for Android
+     * @returns {boolean} true if the browser is supported for Android devices
+     */
+    isSupportedAndroidBrowser() {
+        return this.isChromiumBased() || this.isFirefox();
+    }
+
+    /**
+     * Returns whether the browser is supported for iOS
+     * @returns {boolean} true if the browser is supported for iOS devices
+     */
+    isSupportedIOSBrowser() {
+        return this._getIOSVersion() >= MIN_REQUIRED_IOS_VERSION;
     }
 
     /**
@@ -199,6 +233,15 @@ export default class BrowserCapabilities extends BrowserDetection {
     }
 
     /**
+     * Returns true if VP9 is supported by the client on the browser. VP9 is currently disabled on Firefox and Safari
+     * because of issues with rendering. Please check https://bugzilla.mozilla.org/show_bug.cgi?id=1492500,
+     * https://bugs.webkit.org/show_bug.cgi?id=231071 and https://bugs.webkit.org/show_bug.cgi?id=231074 for details.
+     */
+    supportsVP9() {
+        return this.isChromiumBased() || this.isReactNative();
+    }
+
+    /**
      * Checks if the browser uses SDP munging for turning on simulcast.
      *
      * @returns {boolean}
@@ -236,13 +279,25 @@ export default class BrowserCapabilities extends BrowserDetection {
     }
 
     /**
+     * Checks if the browser supports WebRTC Encoded Transform, an alternative
+     * to insertable streams.
+     *
+     * NOTE: At the time of this writing the only browser supporting this is
+     * Safari / WebKit, behind a flag.
+     *
+     * @returns {boolean} {@code true} if the browser supports it.
+     */
+    supportsEncodedTransform() {
+        return Boolean(window.RTCRtpScriptTransform);
+    }
+
+    /**
      * Checks if the browser supports insertable streams, needed for E2EE.
      * @returns {boolean} {@code true} if the browser supports insertable streams.
      */
     supportsInsertableStreams() {
         if (!(typeof window.RTCRtpSender !== 'undefined'
-            && (window.RTCRtpSender.prototype.createEncodedStreams
-                || window.RTCRtpSender.prototype.createEncodedVideoStreams))) {
+            && window.RTCRtpSender.prototype.createEncodedStreams)) {
             return false;
         }
 
@@ -290,6 +345,17 @@ export default class BrowserCapabilities extends BrowserDetection {
     }
 
     /**
+     * Check if the browser supports the RTP RTX feature (and it is usable).
+     *
+     * @returns {boolean}
+     */
+    supportsRTX() {
+        // Disable RTX on Firefox up to 96 because we prefer simulcast over RTX
+        // see https://bugzilla.mozilla.org/show_bug.cgi?id=1738504
+        return !(this.isFirefox() && this.isVersionLessThan('96'));
+    }
+
+    /**
      * Returns the version of a Chromium based browser.
      *
      * @returns {Number}
@@ -315,6 +381,32 @@ export default class BrowserCapabilities extends BrowserDetection {
 
                 return version;
             }
+        }
+
+        return -1;
+    }
+
+    /**
+     * Returns the version of a Safari browser.
+     *
+     * @returns {Number}
+     */
+    _getSafariVersion() {
+        if (this.isSafari()) {
+            return Number.parseInt(this.getVersion(), 10);
+        }
+
+        return -1;
+    }
+
+    /**
+     * Returns the version of an ios browser.
+     *
+     * @returns {Number}
+     */
+    _getIOSVersion() {
+        if (this.isWebKitBased()) {
+            return Number.parseInt(this.getVersion(), 10);
         }
 
         return -1;
