@@ -32,12 +32,14 @@
     "strophejs-plugin-disco": "0.0.2",
     "strophejs-plugin-stream-management": "github:jitsi/strophejs-plugin-stream-management#001cf02bef2357234e1ac5d163611b4d60bf2b6a",
     "uuid": "8.1.0",
+    "wasm-check": "^2.0.1",
     "webrtc-adapter": "8.0.0"
   },
   "devDependencies": {
     "@babel/core": "7.16.0",
     "@babel/eslint-parser": "7.16.0",
     "@babel/preset-env": "7.16.0",
+    "@babel/preset-flow": "^7.16.0",
     "@babel/preset-typescript": "7.16.7",
     "@jitsi/eslint-config": "4.0.0",
     "@types/sdp-transform": "2.4.5",
@@ -59,7 +61,7 @@
     "webpack-cli": "4.9.0"
   },
   "scripts": {
-    "build": "export LIB_JITSI_MEET_COMMIT_HASH=$(git rev-parse --short HEAD 2>/dev/null) && webpack && tsc",
+    "build": "webpack --mode=production",
     "lint": "eslint .",
     "lint-fix": "eslint . --fix",
     "prepack": "npm run build",
@@ -67,7 +69,6 @@
     "test-watch": "karma start karma.conf.js --no-single-run",
     "validate": "npm ls",
     "watch": "webpack --config webpack.config.js --watch --mode development",
-    "build": "webpack -p",
     "build-dev": "webpack --config webpack.config.js --mode development",
     "build-all": "npm run build && npm run build-dev"
   },

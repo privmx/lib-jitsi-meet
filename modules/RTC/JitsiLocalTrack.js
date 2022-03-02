@@ -21,6 +21,7 @@ import {
 } from '../../service/statistics/AnalyticsEvents';
 import browser from '../browser';
 import Statistics from '../statistics/statistics';
+import { createVirtualBackgroundEffect } from "../stream-effects/virtual-background";
 
 import JitsiTrack from './JitsiTrack';
 import RTCUtils from './RTCUtils';
@@ -859,6 +860,38 @@ export default class JitsiLocalTrack extends JitsiTrack {
                 logger.error('Failed to switch to the new stream!', error);
                 throw error;
             });
+    }
+    
+    /**
+     * Enables/disables/updates virtual background.
+     *
+     * @param {Object} options - Represents the virtual background options.
+     * @returns {Promise<boolean>} - whether requested change succeeded.
+     */
+    async toggleVirtualBackground(options) {
+        // options: {
+        //     enabled: boolean;
+        //     virtualBackground: {
+        //         backgroundEffectEnabled: boolean;
+        //         backgroundType: VIRTUAL_BACKGROUND_TYPE;
+        //         blurValue: number;
+        //         virtualSource: string; // url
+        //     };
+        // };
+        let success = false;
+        try {
+            if (options.enabled) {
+                await this.setEffect(await createVirtualBackgroundEffect(options.virtualBackground));
+            }
+            else {
+                await this.setEffect(undefined);
+            }
+            success = true;
+        }
+        catch (err) {
+           console.error('JitsiLocalTrack.toggleVirtualBackground error:', err);
+        }
+        return success;
     }
 
     /**
