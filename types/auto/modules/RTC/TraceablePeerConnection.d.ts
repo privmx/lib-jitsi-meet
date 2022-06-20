@@ -129,7 +129,7 @@ export default class TraceablePeerConnection {
      * remote tracks.
      * @type {Map<string, Map<MediaType, Set<JitsiRemoteTrack>>>}
      */
-    remoteTracks: Map<string, Map<typeof MediaType, Set<JitsiRemoteTrack>>>;
+    remoteTracks: Map<string, Map<MediaType, Set<JitsiRemoteTrack>>>;
     /**
      * A map which stores local tracks mapped by {@link JitsiLocalTrack.rtcId}
      * @type {Map<number, JitsiLocalTrack>}
@@ -254,6 +254,11 @@ export default class TraceablePeerConnection {
      * explicitly disabled.
      */
     _senderVideoMaxHeight: number;
+    /**
+     * The height constraints to be applied on the sender per local video source (source name as the key).
+     * @type {Map<string, number>}
+     */
+    _senderMaxHeights: Map<string, number>;
     trace: (what: any, info: any) => void;
     onicecandidate: any;
     onTrack: (evt: any) => void;
@@ -288,6 +293,20 @@ export default class TraceablePeerConnection {
      */
     isSimulcastOn(): boolean;
     /**
+     * Handles remote source mute and unmute changed events.
+     *
+     * @param {string} sourceName - The name of the remote source.
+     * @param {boolean} isMuted - The new mute state.
+     */
+    _sourceMutedChanged(sourceName: string, isMuted: boolean): void;
+    /**
+     * Handles remote source videoType changed events.
+     *
+     * @param {string} sourceName - The name of the remote source.
+     * @param {boolean} isMuted - The new value.
+     */
+    _sourceVideoTypeChanged(sourceName: string, videoType: any): void;
+    /**
      * Obtains audio levels of the remote audio tracks by getting the source information on the RTCRtpReceivers.
      * The information relevant to the ssrc is updated each time a RTP packet constaining the ssrc is received.
      * @param {Array<string>} speakerList list of endpoint ids for which audio levels are to be gathered.
@@ -300,7 +319,7 @@ export default class TraceablePeerConnection {
      * @param {MediaType} [mediaType]
      * @return {Array<JitsiLocalTrack>}
      */
-    getLocalTracks(mediaType?: typeof MediaType): Array<any>;
+    getLocalTracks(mediaType?: MediaType): Array<any>;
     /**
      * Retrieves the local video tracks.
      *
@@ -314,7 +333,7 @@ export default class TraceablePeerConnection {
      * @param {MediaType} mediaType - The media type.
      * @return {boolean}
      */
-    hasAnyTracksOfType(mediaType: typeof MediaType): boolean;
+    hasAnyTracksOfType(mediaType: MediaType): boolean;
     /**
      * Obtains all remote tracks currently known to this PeerConnection instance.
      *
@@ -323,7 +342,7 @@ export default class TraceablePeerConnection {
      * specified.
      * @return {Array<JitsiRemoteTrack>}
      */
-    getRemoteTracks(endpointId?: string, mediaType?: typeof MediaType): Array<JitsiRemoteTrack>;
+    getRemoteTracks(endpointId?: string, mediaType?: MediaType): Array<JitsiRemoteTrack>;
     /**
      * Parses the remote description and returns the sdp lines of the sources associated with a remote participant.
      *
@@ -381,10 +400,7 @@ export default class TraceablePeerConnection {
      * @param {boolean} muted the initial muted status
      * @param {String} sourceName the track's source name
      */
-    _createRemoteTrack(ownerEndpointId: string, stream: MediaStream, track: MediaStreamTrack, mediaType: typeof MediaType, videoType?: {
-        CAMERA: string;
-        DESKTOP: string;
-    }, ssrc: number, muted: boolean, sourceName: string): void;
+    _createRemoteTrack(ownerEndpointId: string, stream: MediaStream, track: MediaStreamTrack, mediaType: MediaType, videoType?: VideoType, ssrc: number, muted: boolean, sourceName: string): void;
     /**
      * Handles remote stream removal.
      * @param stream the WebRTC MediaStream object which is being removed from the
@@ -425,14 +441,12 @@ export default class TraceablePeerConnection {
      */
     getLocalSSRC(localTrack: any): number;
     /**
-     * When doing unified plan simulcast, we'll have a set of ssrcs with the
-     * same msid but no ssrc-group, since unified plan signals the simulcast
-     * group via the a=simulcast line.  Unfortunately, Jicofo will complain
-     * if it sees ssrcs with matching msids but no ssrc-group, so we'll inject
-     * an ssrc-group line to make Jicofo happy.
+     * When doing unified plan simulcast, we'll have a set of ssrcs but no ssrc-groups on Firefox. Unfortunately, Jicofo
+     * will complain if it sees ssrcs with matching msids but no ssrc-group, so a ssrc-group line is injected to make
+     * Jicofo happy.
+     *
      * @param desc A session description object (with 'type' and 'sdp' fields)
-     * @return A session description object with its sdp field modified to
-     * contain an inject ssrc-group for simulcast
+     * @return A session description object with its sdp field modified to contain an inject ssrc-group for simulcast.
      */
     _injectSsrcGroupForUnifiedSimulcast(desc: any): any;
     _getSSRC(rtcId: any): {
@@ -540,7 +554,7 @@ export default class TraceablePeerConnection {
     }): void;
     codecPreference: {
         enable: boolean;
-        mediaType: string;
+        mediaType: MediaType;
         mimeType: {
             H264: string;
             OPUS: string;
@@ -622,15 +636,23 @@ export default class TraceablePeerConnection {
      */
     _mungeOpus(description: RTCSessionDescription): RTCSessionDescription;
     /**
+     * Munges the SDP to set all directions to inactive and drop all ssrc and ssrc-groups.
+     *
+     * @param {RTCSessionDescription} description that needs to be munged.
+     * @returns {RTCSessionDescription} the munged description.
+     */
+    _mungeInactive(description: RTCSessionDescription): RTCSessionDescription;
+    /**
      * Sets up the _dtlsTransport object and initializes callbacks for it.
      */
     _initializeDtlsTransport(): void;
     /**
      * Configures the stream encodings depending on the video type and the bitrates configured.
      *
+     * @param {JitsiLocalTrack} - The local track for which the sender encodings have to configured.
      * @returns {Promise} promise that will be resolved when the operation is successful and rejected otherwise.
      */
-    configureSenderVideoEncodings(): Promise<any>;
+    configureSenderVideoEncodings(localVideoTrack?: any): Promise<any>;
     setLocalDescription(description: any): Promise<any>;
     /**
      * Enables/disables audio media transmission on this peer connection. When
@@ -653,9 +675,10 @@ export default class TraceablePeerConnection {
      * bitrates on the send stream.
      *
      * @param {number} frameHeight - The max frame height to be imposed on the outgoing video stream.
+     * @param {JitsiLocalTrack} - The local track for which the sender constraints have to be applied.
      * @returns {Promise} promise that will be resolved when the operation is successful and rejected otherwise.
      */
-    setSenderVideoConstraints(frameHeight: number): Promise<any>;
+    setSenderVideoConstraints(frameHeight: number, localVideoTrack: any): Promise<any>;
     encodingsEnabledState: boolean[];
     /**
      * Enables/disables video media transmission on this peer connection. When
@@ -765,9 +788,10 @@ export default class TraceablePeerConnection {
     toString(): string;
 }
 import RTC from "./RTC";
-import * as MediaType from "../../service/RTC/MediaType";
+import { MediaType } from "../../service/RTC/MediaType";
 import JitsiRemoteTrack from "./JitsiRemoteTrack";
 import { TPCUtils } from "./TPCUtils";
 import SdpConsistency from "../sdp/SdpConsistency";
 import LocalSdpMunger from "../sdp/LocalSdpMunger";
 import RtxModifier from "../sdp/RtxModifier";
+import { VideoType } from "../../service/RTC/VideoType";

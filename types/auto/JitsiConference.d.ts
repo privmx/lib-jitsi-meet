@@ -255,8 +255,18 @@ declare class JitsiConference {
      * @returns {Promise}
      */
     leave(): Promise<any>;
-    private _getActiveMediaSession;
-    private _getMediaSessions;
+    /**
+     * Returns the currently active media session if any.
+     *
+     * @returns {JingleSessionPC|undefined}
+     */
+    getActiveMediaSession(): any | undefined;
+    /**
+     * Returns an array containing all media sessions existing in this conference.
+     *
+     * @returns {Array<JingleSessionPC>}
+     */
+    getMediaSessions(): Array<any>;
     private _registerRtcListeners;
     private _sendBridgeVideoTypeMessage;
     /**
@@ -295,7 +305,7 @@ declare class JitsiConference {
      * specific type is given.
      * @param {MediaType} [mediaType] Optional media type (audio or video).
      */
-    getLocalTracks(mediaType?: typeof MediaType): any[];
+    getLocalTracks(mediaType?: MediaType): any[];
     /**
      * Obtains local audio track.
      * @return {JitsiLocalTrack|null}
@@ -306,6 +316,11 @@ declare class JitsiConference {
      * @return {JitsiLocalTrack|null}
      */
     getLocalVideoTrack(): any | null;
+    /**
+     * Returns all the local video tracks.
+     * @returns {Array<JitsiLocalTrack>}
+     */
+    getLocalVideoTracks(): Array<any>;
     /**
      * Obtains the performance statistics.
      * @returns {Object|null}
@@ -519,6 +534,11 @@ declare class JitsiConference {
      * @returns {number}
      */
     getLastN(): number;
+    /**
+     * Obtains the forwarded sources list in this conference.
+     * @return {Array<string>|null}
+     */
+    getForwardedSources(): Array<string> | null;
     /**
      * Selects a new value for "lastN". The requested amount of videos are going
      * to be delivered after the value is in effect. Set to -1 for unlimited or
@@ -966,10 +986,10 @@ declare class JitsiConference {
      */
     getSpeakerStats(): object;
     /**
-     * Sends a facial expression with its duration to the xmpp server.
+     * Sends a face landmarks object to the xmpp server.
      * @param {Object} payload
      */
-    sendFacialExpression(payload: any): void;
+    sendFaceLandmarks(payload: any): void;
     /**
      * Sets the constraints for the video that is requested from the bridge.
      *
@@ -1087,6 +1107,39 @@ declare class JitsiConference {
      */
     joinLobby(displayName: string, email: string): Promise<never>;
     /**
+     * Gets the local id for a participant in a lobby room.
+     * Returns undefined when current participant is not in the lobby room.
+     * This is used for lobby room private chat messages.
+     *
+     * @returns {string}
+     */
+    myLobbyUserId(): string;
+    /**
+     * Sends a message to a lobby room.
+     * When id is specified it sends a private message.
+     * Otherwise it sends the message to all moderators.
+     * @param {message} Object The message to send
+     * @param {string} id The participant id.
+     *
+     * @returns {void}
+     */
+    sendLobbyMessage(message: any, id: string): void;
+    /**
+     * Adds a message listener to the lobby room
+     * @param {Function} listener The listener function,
+     * called when a new message is received in the lobby room.
+     *
+     * @returns {Function} Handler returned to be able to remove it later.
+     */
+    addLobbyMessageListener(listener: Function): Function;
+    /**
+     * Removes a message handler from the lobby room
+     * @param {Function} handler The handler function  to remove.
+     *
+     * @returns {void}
+     */
+    removeLobbyMessageHandler(handler: Function): void;
+    /**
      * Denies an occupant in the lobby room access to the conference.
      * @param {string} id The participant id.
      */
@@ -1107,26 +1160,26 @@ declare class JitsiConference {
      * Enables AV Moderation.
      * @param {MediaType} mediaType "audio" or "video"
      */
-    enableAVModeration(mediaType: typeof MediaType): void;
+    enableAVModeration(mediaType: MediaType): void;
     /**
      * Disables AV Moderation.
      * @param {MediaType} mediaType "audio" or "video"
      */
-    disableAVModeration(mediaType: typeof MediaType): void;
+    disableAVModeration(mediaType: MediaType): void;
     /**
      * Approve participant access to certain media, allows unmuting audio or video.
      *
      * @param {MediaType} mediaType "audio" or "video"
      * @param id the id of the participant.
      */
-    avModerationApprove(mediaType: typeof MediaType, id: any): void;
+    avModerationApprove(mediaType: MediaType, id: any): void;
     /**
      * Reject participant access to certain media, blocks unmuting audio or video.
      *
      * @param {MediaType} mediaType "audio" or "video"
      * @param id the id of the participant.
      */
-    avModerationReject(mediaType: typeof MediaType, id: any): void;
+    avModerationReject(mediaType: MediaType, id: any): void;
     /**
      * Returns the breakout rooms manager object.
      *
@@ -1163,15 +1216,15 @@ import { E2EEncryption } from "./modules/e2ee/E2EEncryption";
 import { CodecSelection } from "./modules/RTC/CodecSelection";
 import E2ePing from "./modules/e2eping/e2eping";
 import RTC from "./modules/RTC/RTC";
-import { ReceiveVideoController } from "./modules/qualitycontrol/ReceiveVideoController";
-import { SendVideoController } from "./modules/qualitycontrol/SendVideoController";
+import ReceiveVideoController from "./modules/qualitycontrol/ReceiveVideoController";
+import SendVideoController from "./modules/qualitycontrol/SendVideoController";
 import ParticipantConnectionStatusHandler from "./modules/connectivity/ParticipantConnectionStatus";
 import Statistics from "./modules/statistics/statistics";
 import VADAudioAnalyser from "./modules/detection/VADAudioAnalyser";
 import NoAudioSignalDetection from "./modules/detection/NoAudioSignalDetection";
 import Jvb121EventGenerator from "./modules/event/Jvb121EventGenerator";
 import P2PDominantSpeakerDetection from "./modules/detection/P2PDominantSpeakerDetection";
-import * as MediaType from "./service/RTC/MediaType";
+import { MediaType } from "./service/RTC/MediaType";
 import Transcriber from "./modules/transcription/transcriber";
 import JitsiParticipant from "./JitsiParticipant";
 import IceFailedHandling from "./modules/connectivity/IceFailedHandling";

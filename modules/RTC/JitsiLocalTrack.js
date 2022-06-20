@@ -11,15 +11,16 @@ import {
     TRACK_MUTE_CHANGED
 } from '../../JitsiTrackEvents';
 import CameraFacingMode from '../../service/RTC/CameraFacingMode';
-import * as MediaType from '../../service/RTC/MediaType';
+import { MediaType } from '../../service/RTC/MediaType';
 import RTCEvents from '../../service/RTC/RTCEvents';
-import VideoType from '../../service/RTC/VideoType';
+import { VideoType } from '../../service/RTC/VideoType';
 import {
     NO_BYTES_SENT,
     TRACK_UNMUTED,
     createNoDataFromSourceEvent
 } from '../../service/statistics/AnalyticsEvents';
 import browser from '../browser';
+import FeatureFlags from '../flags/FeatureFlags';
 import Statistics from '../statistics/statistics';
 import { createVirtualBackgroundEffect } from "../stream-effects/virtual-background";
 
@@ -163,6 +164,9 @@ export default class JitsiLocalTrack extends JitsiTrack {
         // NOTE: this.deviceId corresponds to the device id specified in GUM constraints and this._realDeviceId seems to
         // correspond to the id of a matching device from the available device list.
         this._realDeviceId = this.deviceId === '' ? undefined : this.deviceId;
+
+        // The source name that will be signaled for this track.
+        this._sourceName = null;
 
         this._trackMutedTS = 0;
 
@@ -352,7 +356,8 @@ export default class JitsiLocalTrack extends JitsiTrack {
      * @returns {Promise}
      */
     _setMuted(muted) {
-        if (this.isMuted() === muted) {
+        if (this.isMuted() === muted
+            && !(this.videoType === VideoType.DESKTOP && FeatureFlags.isMultiStreamSupportEnabled())) {
             return Promise.resolve();
         }
 
@@ -365,8 +370,12 @@ export default class JitsiLocalTrack extends JitsiTrack {
         // A function that will print info about muted status transition
         const logMuteInfo = () => logger.info(`Mute ${this}: ${muted}`);
 
+        // In the multi-stream mode, desktop tracks are muted from jitsi-meet instead of being removed from the
+        // conference. This is needed because we don't want the client to signal a source-remove to the remote peer for
+        // the desktop track when screenshare is stopped. Later when screenshare is started again, the same sender will
+        // be re-used without the need for signaling a new ssrc through source-add.
         if (this.isAudioTrack()
-                || this.videoType === VideoType.DESKTOP
+                || (this.videoType === VideoType.DESKTOP && !FeatureFlags.isMultiStreamSupportEnabled())
                 || !browser.doesVideoMuteByStreamRemove()) {
             logMuteInfo();
 
@@ -393,6 +402,7 @@ export default class JitsiLocalTrack extends JitsiTrack {
                         this._unregisterHandlers();
                         this.stopStream();
                         this._setStream(null);
+
                         resolve();
                     },
                     reject);
@@ -439,8 +449,7 @@ export default class JitsiLocalTrack extends JitsiTrack {
                     this._startStreamEffect(this._streamEffect);
                 }
 
-                this.containers.map(
-                    cont => RTCUtils.attachMediaStream(cont, this.stream));
+                this.containers.map(cont => RTCUtils.attachMediaStream(cont, this.stream));
 
                 return this._addStreamToConferenceAsUnmute();
             });
@@ -449,6 +458,9 @@ export default class JitsiLocalTrack extends JitsiTrack {
         return promise
             .then(() => {
                 this._sendMuteStatus(muted);
+
+                // Send the videoType message to the bridge.
+                this.isVideoTrack() && this.conference && this.conference._sendBridgeVideoTypeMessage(this);
                 this.emit(TRACK_MUTE_CHANGED, this);
             });
     }
@@ -464,7 +476,9 @@ export default class JitsiLocalTrack extends JitsiTrack {
     _setRealDeviceIdFromDeviceList(devices) {
         const track = this.getTrack();
         const kind = `${track.kind}input`;
-        let device = devices.find(d => d.kind === kind && d.label === track.label);
+
+        // We need to match by deviceId as well, in case of multiple devices with the same label.
+        let device = devices.find(d => d.kind === kind && d.label === track.label && d.deviceId === this.deviceId);
 
         if (!device && this._realDeviceId === 'default') { // the default device has been changed.
             // If the default device was 'A' and the default device is changed to 'B' the label for the track will
@@ -588,8 +602,10 @@ export default class JitsiLocalTrack extends JitsiTrack {
             promise = this.setEffect();
         }
 
+        let removeTrackPromise = Promise.resolve();
+
         if (this.conference) {
-            promise = promise.then(() => this.conference.removeTrack(this));
+            removeTrackPromise = this.conference.removeTrack(this);
         }
 
         if (this.stream) {
@@ -604,7 +620,7 @@ export default class JitsiLocalTrack extends JitsiTrack {
                 this._onAudioOutputDeviceChanged);
         }
 
-        return promise.then(() => super.dispose());
+        return Promise.allSettled([ promise, removeTrackPromise ]).then(() => super.dispose());
     }
 
     /**
@@ -667,6 +683,15 @@ export default class JitsiLocalTrack extends JitsiTrack {
      */
     getParticipantId() {
         return this.conference && this.conference.myUserId();
+    }
+
+    /**
+     * Returns the source name associated with the jitsi track.
+     *
+     * @returns {string | null} source name
+     */
+    getSourceName() {
+        return this._sourceName;
     }
 
     /**
@@ -892,6 +917,15 @@ export default class JitsiLocalTrack extends JitsiTrack {
            console.error('JitsiLocalTrack.toggleVirtualBackground error:', err);
         }
         return success;
+    }
+
+    /**
+     * Sets the source name to be used for signaling the jitsi track.
+     *
+     * @param {string} name The source name.
+     */
+    setSourceName(name) {
+        this._sourceName = name;
     }
 
     /**

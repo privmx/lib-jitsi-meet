@@ -16,6 +16,8 @@ export default class LocalSdpMunger {
     constructor(tpc: any, localEndpointId: string);
     tpc: any;
     localEndpointId: string;
+    audioSourcesToMsidMap: Map<any, any>;
+    videoSourcesToMsidMap: Map<any, any>;
     /**
      * Makes sure that muted local video tracks associated with the parent
      * {@link TraceablePeerConnection} are described in the local SDP. It's done
@@ -42,12 +44,11 @@ export default class LocalSdpMunger {
      */
     _generateMsidAttribute(mediaType: string, trackId: string, streamId?: string): string | null;
     /**
-     * Modifies 'cname', 'msid', 'label' and 'mslabel' by appending
-     * the id of {@link LocalSdpMunger#tpc} at the end, preceding by a dash
-     * sign.
+     * Modifies 'cname', 'msid', 'label' and 'mslabel' by appending the id of {@link LocalSdpMunger#tpc} at the end,
+     * preceding by a dash sign.
      *
-     * @param {MLineWrap} mediaSection - The media part (audio or video) of the
-     * session description which will be modified in place.
+     * @param {MLineWrap} mediaSection - The media part (audio or video) of the session description which will be
+     * modified in place.
      * @returns {void}
      * @private
      */

@@ -42,6 +42,14 @@ export default class JingleSessionPC extends JingleSession {
      */
     static parseMaxFrameHeight(jingleContents: any): number | null;
     /**
+     * Parses the source-name and max frame height value of the 'content-modify' IQ when source-name signaling
+     * is enabled.
+     *
+     * @param {jQuery} jingleContents - A jQuery selector pointing to the '>jingle' element.
+     * @returns {Object|null}
+     */
+    static parseSourceMaxFrameHeight(jingleContents: any): any | null;
+    /**
      * Creates new <tt>JingleSessionPC</tt>
      * @param {string} sid the Jingle Session ID - random string which identifies the session
      * @param {string} localJid our JID
@@ -107,6 +115,13 @@ export default class JingleSessionPC extends JingleSession {
      */
     localRecvMaxFrameHeight: number | undefined;
     /**
+     * Receiver constraints (max height) set by the application per remote source. Will be used for p2p connection
+     * in lieu of localRecvMaxFrameHeight when source-name signaling is enabled.
+     *
+     * @type {Map<string, number>}
+     */
+    _sourceReceiverConstraints: Map<string, number>;
+    /**
      * Indicates whether or not this session is willing to send/receive
      * video media. When set to <tt>false</tt> the underlying peer
      * connection will disable local video transfer and the remote peer will
@@ -156,6 +171,12 @@ export default class JingleSessionPC extends JingleSession {
      */
     remoteRecvMaxFrameHeight: number | undefined;
     /**
+     * Remote preference for the receive video max frame heights when source-name signaling is enabled.
+     *
+     * @type {Map<string, number>|undefined}
+     */
+    remoteSourceMaxFrameHeights: Map<string, number> | undefined;
+    /**
      * The queue used to serialize operations done on the peerconnection.
      *
      * @type {AsyncQueue}
@@ -204,6 +225,12 @@ export default class JingleSessionPC extends JingleSession {
      * @returns {Number|undefined}
      */
     getRemoteRecvMaxFrameHeight(): number | undefined;
+    /**
+     * Remote preference for receive video max frame heights when source-name signaling is enabled.
+     *
+     * @returns {Map<string, number>|undefined}
+     */
+    getRemoteSourcesRecvMaxFrameHeight(): Map<string, number> | undefined;
     /**
      * Sends given candidate in Jingle 'transport-info' message.
      * @param {RTCIceCandidate} candidate the WebRTC ICE candidate instance
@@ -327,8 +354,9 @@ export default class JingleSessionPC extends JingleSession {
      * the remote party.
      *
      * @param {Number} maxFrameHeight - the new value to set.
+     * @param {Map<string, number>} sourceReceiverConstraints - The receiver constraints per source.
      */
-    setReceiverVideoConstraint(maxFrameHeight: number): void;
+    setReceiverVideoConstraint(maxFrameHeight: number, sourceReceiverConstraints: Map<string, number>): void;
     /**
      * Sends Jingle 'transport-accept' message which is a response to
      * 'transport-replace'.
@@ -355,10 +383,11 @@ export default class JingleSessionPC extends JingleSession {
     /**
      * Sets the resolution constraint on the local camera track.
      * @param {number} maxFrameHeight - The user preferred max frame height.
+     * @param {string} sourceName - The source name of the track.
      * @returns {Promise} promise that will be resolved when the operation is
      * successful and rejected otherwise.
      */
-    setSenderVideoConstraint(maxFrameHeight: number): Promise<any>;
+    setSenderVideoConstraint(maxFrameHeight: number, sourceName?: string): Promise<any>;
     /**
      *
      * @param reasonCondition
@@ -454,6 +483,15 @@ export default class JingleSessionPC extends JingleSession {
      * @private
      */
     private _initiatorRenegotiate;
+    /**
+     * Adds a new track to the peerconnection. This method needs to be called only when a secondary JitsiLocalTrack is
+     * being added to the peerconnection for the first time.
+     *
+     * @param {Array<JitsiLocalTrack>} localTracks - Tracks to be added to the peer connection.
+     * @returns {Promise<void>} that resolves when the track is successfully added to the peerconnection, rejected
+     * otherwise.
+     */
+    addTracks(localTracks?: Array<any>): Promise<void>;
     /**
      * Replaces <tt>oldTrack</tt> with <tt>newTrack</tt> and performs a single
      * offer/answer cycle after both operations are done. Either
