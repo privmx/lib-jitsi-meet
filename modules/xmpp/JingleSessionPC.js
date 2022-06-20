@@ -4,12 +4,13 @@ import { getLogger } from '@jitsi/logger';
 import { $iq, Strophe } from 'strophe.js';
 
 import * as CodecMimeType from '../../service/RTC/CodecMimeType';
-import MediaDirection from '../../service/RTC/MediaDirection';
+import { MediaDirection } from '../../service/RTC/MediaDirection';
+import { MediaType } from '../../service/RTC/MediaType';
 import {
     ICE_DURATION,
     ICE_STATE_CHANGED
 } from '../../service/statistics/AnalyticsEvents';
-import XMPPEvents from '../../service/xmpp/XMPPEvents';
+import { XMPPEvents } from '../../service/xmpp/XMPPEvents';
 import { SS_DEFAULT_FRAME_RATE } from '../RTC/ScreenObtainer';
 import FeatureFlags from '../flags/FeatureFlags';
 import SDP from '../sdp/SDP';
@@ -121,6 +122,34 @@ export default class JingleSessionPC extends JingleSession {
         return maxFrameHeightSel.length ? Number(maxFrameHeightSel.text()) : null;
     }
 
+    /**
+     * Parses the source-name and max frame height value of the 'content-modify' IQ when source-name signaling
+     * is enabled.
+     *
+     * @param {jQuery} jingleContents - A jQuery selector pointing to the '>jingle' element.
+     * @returns {Object|null}
+     */
+    static parseSourceMaxFrameHeight(jingleContents) {
+        const receiverConstraints = [];
+        const sourceFrameHeightSel = jingleContents.find('>content[name="video"]>source-frame-height');
+        let maxHeight, sourceName;
+
+        if (sourceFrameHeightSel.length) {
+            sourceFrameHeightSel.each((_, source) => {
+                sourceName = source.getAttribute('sourceName');
+                maxHeight = source.getAttribute('maxHeight');
+                receiverConstraints.push({
+                    maxHeight,
+                    sourceName
+                });
+            });
+
+            return receiverConstraints;
+        }
+
+        return null;
+    }
+
     /* eslint-disable max-params */
 
     /**
@@ -208,6 +237,14 @@ export default class JingleSessionPC extends JingleSession {
         this.localRecvMaxFrameHeight = undefined;
 
         /**
+         * Receiver constraints (max height) set by the application per remote source. Will be used for p2p connection
+         * in lieu of localRecvMaxFrameHeight when source-name signaling is enabled.
+         *
+         * @type {Map<string, number>}
+         */
+        this._sourceReceiverConstraints = undefined;
+
+        /**
          * Indicates whether or not this session is willing to send/receive
          * video media. When set to <tt>false</tt> the underlying peer
          * connection will disable local video transfer and the remote peer will
@@ -261,6 +298,13 @@ export default class JingleSessionPC extends JingleSession {
          * @type {Number|undefined}
          */
         this.remoteRecvMaxFrameHeight = undefined;
+
+        /**
+         * Remote preference for the receive video max frame heights when source-name signaling is enabled.
+         *
+         * @type {Map<string, number>|undefined}
+         */
+        this.remoteSourceMaxFrameHeights = undefined;
 
         /**
          * The queue used to serialize operations done on the peerconnection.
@@ -640,6 +684,19 @@ export default class JingleSessionPC extends JingleSession {
     }
 
     /**
+     * Remote preference for receive video max frame heights when source-name signaling is enabled.
+     *
+     * @returns {Map<string, number>|undefined}
+     */
+    getRemoteSourcesRecvMaxFrameHeight() {
+        if (this.isP2P) {
+            return this.remoteSourceMaxFrameHeights;
+        }
+
+        return undefined;
+    }
+
+    /**
      * Sends given candidate in Jingle 'transport-info' message.
      * @param {RTCIceCandidate} candidate the WebRTC ICE candidate instance
      * @private
@@ -867,39 +924,33 @@ export default class JingleSessionPC extends JingleSession {
      * @param contents
      */
     readSsrcInfo(contents) {
-        const ssrcs
-            = $(contents).find(
-                '>description>'
-                    + 'source[xmlns="urn:xmpp:jingle:apps:rtp:ssma:0"]');
+        const ssrcs = $(contents).find('>description>source[xmlns="urn:xmpp:jingle:apps:rtp:ssma:0"]');
 
         ssrcs.each((i, ssrcElement) => {
             const ssrc = Number(ssrcElement.getAttribute('ssrc'));
 
+            if (FeatureFlags.isSourceNameSignalingEnabled()) {
+                if (ssrcElement.hasAttribute('name')) {
+                    const sourceName = ssrcElement.getAttribute('name');
+
+                    this._signalingLayer.setTrackSourceName(ssrc, sourceName);
+                }
+            }
+
             if (this.isP2P) {
                 // In P2P all SSRCs are owner by the remote peer
-                this._signalingLayer.setSSRCOwner(
-                    ssrc, Strophe.getResourceFromJid(this.remoteJid));
+                this._signalingLayer.setSSRCOwner(ssrc, Strophe.getResourceFromJid(this.remoteJid));
             } else {
-                if (FeatureFlags.isSourceNameSignalingEnabled()) {
-                    // Only set sourceName for non-P2P case
-                    if (ssrcElement.hasAttribute('name')) {
-                        const sourceName = ssrcElement.getAttribute('name');
-
-                        this._signalingLayer.setTrackSourceName(ssrc, sourceName);
-                    }
-                }
                 $(ssrcElement)
                     .find('>ssrc-info[xmlns="http://jitsi.org/jitmeet"]')
                     .each((i3, ssrcInfoElement) => {
                         const owner = ssrcInfoElement.getAttribute('owner');
 
-                        if (owner && owner.length) {
+                        if (owner?.length) {
                             if (isNaN(ssrc) || ssrc < 0) {
                                 logger.warn(`${this} Invalid SSRC ${ssrc} value received for ${owner}`);
                             } else {
-                                this._signalingLayer.setSSRCOwner(
-                                    ssrc,
-                                    getEndpointId(owner));
+                                this._signalingLayer.setSSRCOwner(ssrc, getEndpointId(owner));
                             }
                         }
                     });
@@ -956,12 +1007,22 @@ export default class JingleSessionPC extends JingleSession {
                 // modify sendSessionAccept method to do that
                 this.sendSessionAccept(() => {
                     success();
-
                     this.room.eventEmitter.emit(XMPPEvents.SESSION_ACCEPT, this);
+
+                    // The first video track is added to the peerconnection and signaled as part of the session-accept.
+                    // Add secondary video tracks (that were already added to conference) to the peerconnection here.
+                    // This will happen when someone shares a secondary source to a two people call, the other user
+                    // leaves and joins the call again, a new peerconnection is created for p2p/jvb connection. At this
+                    // point, there are 2 video tracks which need to be signaled to the remote peer.
+                    const videoTracks = localTracks.filter(track => track.getType() === MediaType.VIDEO);
+
+                    videoTracks.length && videoTracks.splice(0, 1);
+                    if (FeatureFlags.isMultiStreamSupportEnabled() && videoTracks.length) {
+                        this.addTracks(videoTracks);
+                    }
                 },
                 error => {
                     failure(error);
-
                     this.room.eventEmitter.emit(XMPPEvents.SESSION_ACCEPT_ERROR, this, error);
                 });
             },
@@ -984,8 +1045,8 @@ export default class JingleSessionPC extends JingleSession {
         const workFunction = finishedCallback => {
             const addTracks = [];
 
-            for (const localTrack of localTracks) {
-                addTracks.push(this.peerconnection.addTrack(localTrack, this.isInitiator));
+            for (const track of localTracks) {
+                addTracks.push(this.peerconnection.addTrack(track, this.isInitiator));
             }
 
             Promise.all(addTracks)
@@ -1108,15 +1169,21 @@ export default class JingleSessionPC extends JingleSession {
     setOfferAnswerCycle(jingleOfferAnswerIq, success, failure, localTracks = []) {
         const workFunction = finishedCallback => {
             const addTracks = [];
+            const audioTracks = localTracks.filter(track => track.getType() === MediaType.AUDIO);
+            const videoTracks = localTracks.filter(track => track.getType() === MediaType.VIDEO);
+            let tracks = localTracks;
 
-            for (const track of localTracks) {
+            // Add only 1 video track at a time. Adding 2 or more video tracks to the peerconnection at the same time
+            // makes the browser go into a renegotiation loop by firing 'negotiationneeded' event after every
+            // renegotiation.
+            if (FeatureFlags.isMultiStreamSupportEnabled() && videoTracks.length > 1) {
+                tracks = [ ...audioTracks, videoTracks[0] ];
+            }
+            for (const track of tracks) {
                 addTracks.push(this.peerconnection.addTrack(track, this.isInitiator));
             }
-
-            const newRemoteSdp
-                = this._processNewJingleOfferIq(jingleOfferAnswerIq);
-            const oldLocalSdp
-                = this.peerconnection.localDescription.sdp;
+            const newRemoteSdp = this._processNewJingleOfferIq(jingleOfferAnswerIq);
+            const oldLocalSdp = this.peerconnection.localDescription.sdp;
 
             const bridgeSession
                 = $(jingleOfferAnswerIq)
@@ -1134,35 +1201,27 @@ export default class JingleSessionPC extends JingleSession {
                     if (this.state === JingleSessionState.PENDING) {
                         this.state = JingleSessionState.ACTIVE;
 
-                        // #1 Sync up video transfer active/inactive only after
-                        // the initial O/A cycle. We want to adjust the video
-                        // media direction only in the local SDP and the Jingle
-                        // contents direction included in the initial
-                        // offer/answer is mapped to the remote SDP. Jingle
-                        // 'content-modify' IQ is processed in a way that it
-                        // will only modify local SDP when remote peer is no
-                        // longer interested in receiving video content.
-                        // Changing media direction in the remote SDP will mess
-                        // up our SDP translation chain (simulcast, video mute,
-                        // RTX etc.)
-                        //
+                        // #1 Sync up video transfer active/inactive only after the initial O/A cycle. We want to
+                        // adjust the video media direction only in the local SDP and the Jingle contents direction
+                        // included in the initial offer/answer is mapped to the remote SDP. Jingle 'content-modify'
+                        // IQ is processed in a way that it will only modify local SDP when remote peer is no longer
+                        // interested in receiving video content. Changing media direction in the remote SDP will mess
+                        // up our SDP translation chain (simulcast, video mute, RTX etc.)
                         // #2 Sends the max frame height if it was set, before the session-initiate/accept
                         if (this.isP2P
-                            && (!this._localVideoActive || this.localRecvMaxFrameHeight)) {
+                            && (!this._localVideoActive
+                                || this.localRecvMaxFrameHeight
+                                || this._sourceReceiverConstraints)) {
                             this.sendContentModify();
                         }
                     }
 
-                    // Old local SDP will be available when we're setting answer
-                    // for the first time, but not when offer and it's fine
-                    // since we're generating an answer now it will contain all
-                    // our SSRCs
+                    // Old local SDP will be available when we're setting answer for the first time, but not when offer
+                    // and it's fine since we're generating an answer now it will contain all our SSRCs.
                     if (oldLocalSdp) {
-                        const newLocalSdp
-                            = new SDP(this.peerconnection.localDescription.sdp);
+                        const newLocalSdp = new SDP(this.peerconnection.localDescription.sdp);
 
-                        this.notifyMySSRCUpdate(
-                            new SDP(oldLocalSdp), newLocalSdp);
+                        this.notifyMySSRCUpdate(new SDP(oldLocalSdp), newLocalSdp);
                     }
                 })
                 .then(() => finishedCallback(), error => finishedCallback(error));
@@ -1383,7 +1442,7 @@ export default class JingleSessionPC extends JingleSession {
                     sid: this.sid
                 })
                 .c('content', {
-                    name: 'video',
+                    name: MediaType.VIDEO,
                     senders
                 });
 
@@ -1391,9 +1450,24 @@ export default class JingleSessionPC extends JingleSession {
             sessionModify = sessionModify
                 .c('max-frame-height', { xmlns: 'http://jitsi.org/jitmeet/video' })
                 .t(maxFrameHeight);
+            logger.info(`${this} sending content-modify, video senders: ${senders},`
+                + ` max frame height: ${maxFrameHeight}`);
         }
 
-        logger.info(`${this} sending content-modify, video senders: ${senders}, max frame height: ${maxFrameHeight}`);
+        if (typeof this._sourceReceiverConstraints !== 'undefined') {
+            this._sourceReceiverConstraints.forEach((maxHeight, sourceName) => {
+                sessionModify
+                    .c('source-frame-height', { xmlns: 'http://jitsi.org/jitmeet/video' })
+                    .attrs({
+                        sourceName,
+                        maxHeight
+                    });
+
+                sessionModify.up();
+                logger.info(`${this} sending content-modify for source-name: ${sourceName}, maxHeight: ${maxHeight}`);
+            });
+        }
+
         logger.debug(sessionModify.tree());
 
         this.connection.sendIQ(
@@ -1408,11 +1482,17 @@ export default class JingleSessionPC extends JingleSession {
      * the remote party.
      *
      * @param {Number} maxFrameHeight - the new value to set.
+     * @param {Map<string, number>} sourceReceiverConstraints - The receiver constraints per source.
      */
-    setReceiverVideoConstraint(maxFrameHeight) {
-        logger.info(`${this} setReceiverVideoConstraint - max frame height: ${maxFrameHeight}`);
+    setReceiverVideoConstraint(maxFrameHeight, sourceReceiverConstraints) {
+        logger.info(`${this} setReceiverVideoConstraint - max frame height: ${maxFrameHeight}`
+            + ` sourceReceiverConstraints: ${sourceReceiverConstraints}`);
 
-        this.localRecvMaxFrameHeight = maxFrameHeight;
+        if (FeatureFlags.isSourceNameSignalingEnabled()) {
+            this._sourceReceiverConstraints = sourceReceiverConstraints;
+        } else {
+            this.localRecvMaxFrameHeight = maxFrameHeight;
+        }
 
         if (this.isP2P) {
             // Tell the remote peer about our receive constraint. If Jingle session is not yet active the state will
@@ -1420,8 +1500,6 @@ export default class JingleSessionPC extends JingleSession {
             if (this.state === JingleSessionState.ACTIVE) {
                 this.sendContentModify();
             }
-        } else {
-            this.rtc.setReceiverVideoConstraint(maxFrameHeight);
         }
     }
 
@@ -1505,26 +1583,19 @@ export default class JingleSessionPC extends JingleSession {
     /**
      * Sets the resolution constraint on the local camera track.
      * @param {number} maxFrameHeight - The user preferred max frame height.
+     * @param {string} sourceName - The source name of the track.
      * @returns {Promise} promise that will be resolved when the operation is
      * successful and rejected otherwise.
      */
-    setSenderVideoConstraint(maxFrameHeight) {
+    setSenderVideoConstraint(maxFrameHeight, sourceName = null) {
         if (this._assertNotEnded()) {
-            logger.info(`${this} setSenderVideoConstraint: ${maxFrameHeight}`);
+            logger.info(`${this} setSenderVideoConstraint: ${maxFrameHeight}, sourceName: ${sourceName}`);
 
-            // RN doesn't support RTCRtpSenders yet, aggresive layer suspension on RN is implemented
-            // by changing the media direction in the SDP. This is applicable to jvb sessions only.
-            if (!this.isP2P && browser.isReactNative() && typeof maxFrameHeight !== 'undefined') {
-                const videoActive = maxFrameHeight > 0;
+            const jitsiLocalTrack = sourceName
+                ? this.rtc.getLocalVideoTracks().find(track => track.getSourceName() === sourceName)
+                : this.rtc.getLocalVideoTrack();
 
-                return this.setMediaTransferActive(true, videoActive);
-            }
-
-            const promise = typeof maxFrameHeight === 'undefined'
-                ? this.peerconnection.configureSenderVideoEncodings()
-                : this.peerconnection.setSenderVideoConstraints(maxFrameHeight);
-
-            return promise;
+            return this.peerconnection.setSenderVideoConstraints(maxFrameHeight, jitsiLocalTrack);
         }
 
         return Promise.resolve();
@@ -1688,6 +1759,8 @@ export default class JingleSessionPC extends JingleSession {
                 });
             });
 
+            let midFound = false;
+
             /* eslint-enable no-invalid-this */
             currentRemoteSdp.media.forEach((media, i2) => {
                 if (!SDPUtil.findLine(media, `a=mid:${name}`)) {
@@ -1697,7 +1770,14 @@ export default class JingleSessionPC extends JingleSession {
                     addSsrcInfo[i2] = '';
                 }
                 addSsrcInfo[i2] += lines;
+                midFound = true;
             });
+
+            // In p2p unified mode with multi-stream enabled, the new sources will have content name that doesn't exist
+            // in the current remote description. Add a new m-line for this newly signaled source.
+            if (!midFound && this.isP2P && FeatureFlags.isSourceNameSignalingEnabled()) {
+                addSsrcInfo[name] = lines;
+            }
         });
 
         return addSsrcInfo;
@@ -1870,21 +1950,15 @@ export default class JingleSessionPC extends JingleSession {
             lines = lines.split('\r\n');
             lines.pop(); // remove empty last element;
             if (this.usesUnifiedPlan) {
+                let mid;
+
                 lines.forEach(line => {
-                    const mid = remoteSdp.media.findIndex(mLine => mLine.includes(line));
+                    mid = remoteSdp.media.findIndex(mLine => mLine.includes(line));
 
                     if (mid > -1) {
-                        const mediaType = SDPUtil.parseMLine(remoteSdp.media[mid].split('\r\n')[0])?.media;
-
+                        remoteSdp.media[mid] = remoteSdp.media[mid].replace(`${line}\r\n`, '');
                         if (this.isP2P) {
-                            // Do not remove ssrcs from m-line in p2p mode. If the ssrc is removed and added back to
-                            // the same m-line (on source-add), Chrome/Safari do not render the media even if it is
-                            // being received and decoded from the remote peer. The webrtc spec is not clear about
-                            // m-line re-use and the browser vendors have implemented this differently. Currently work
-                            // around this by changing the media direction, that should be enough for the browser to
-                            // fire the "removetrack" event on the associated MediaStream. Also, the current direction
-                            // of the transceiver for p2p will depend on whether a local sources is added or not. It
-                            // will be 'sendrecv' if the local source is present, 'sendonly' otherwise.
+                            const mediaType = SDPUtil.parseMLine(remoteSdp.media[mid].split('\r\n')[0])?.media;
                             const desiredDirection = this.peerconnection.getDesiredMediaDirection(mediaType, false);
 
                             [ MediaDirection.SENDRECV, MediaDirection.SENDONLY ].forEach(direction => {
@@ -1892,17 +1966,21 @@ export default class JingleSessionPC extends JingleSession {
                                     .replace(`a=${direction}`, `a=${desiredDirection}`);
                             });
                         } else {
-                            // Change the port to 0 to reject the m-line associated with the source. The rejected
-                            // m-lines are recycled when new ssrcs need to be added to the remote description.
-                            const port = SDPUtil.parseMLine(remoteSdp.media[mid].split('\r\n')[0])?.port;
-
-                            remoteSdp.media[mid] = remoteSdp.media[mid].replace(`${line}\r\n`, '');
-                            remoteSdp.media[mid] = remoteSdp.media[mid].replace(
-                                `m=${mediaType} ${port}`,
-                                `m=${mediaType} 0`);
+                            // Jvb connections will have direction set to 'sendonly' for the remote sources.
+                            remoteSdp.media[mid] = remoteSdp.media[mid]
+                                .replace(`a=${MediaDirection.SENDONLY}`, `a=${MediaDirection.INACTIVE}`);
                         }
                     }
                 });
+
+                // Reject the m-line so that the browser removes the associated transceiver from the list of available
+                // transceivers. This will prevent the client from trying to re-use these inactive transceivers when
+                // additional video sources are added to the peerconnection.
+                if (mid > -1 && !this.isP2P && FeatureFlags.isMultiStreamSupportEnabled()) {
+                    const { media, port } = SDPUtil.parseMLine(remoteSdp.media[mid].split('\r\n')[0]);
+
+                    remoteSdp.media[mid] = remoteSdp.media[mid].replace(`m=${media} ${port}`, `m=${media} 0`);
+                }
             } else {
                 lines.forEach(line => {
                     remoteSdp.media[idx] = remoteSdp.media[idx].replace(`${line}\r\n`, '');
@@ -1922,8 +2000,17 @@ export default class JingleSessionPC extends JingleSession {
      *  in removeSsrcInfo
      */
     _processRemoteAddSource(addSsrcInfo) {
-        const remoteSdp = new SDP(this.peerconnection.remoteDescription.sdp);
+        let remoteSdp = new SDP(this.peerconnection.remoteDescription.sdp);
 
+        // Add a new m-line in the remote description if the source info for a secondary video source is recceived from
+        // the remote p2p peer when multi-stream support is enabled.
+        if (addSsrcInfo.length > remoteSdp.media.length
+            && FeatureFlags.isSourceNameSignalingEnabled()
+            && this.isP2P
+            && this.usesUnifiedPlan) {
+            remoteSdp.addMlineForNewLocalSource(MediaType.VIDEO);
+            remoteSdp = new SDP(remoteSdp.raw);
+        }
         addSsrcInfo.forEach((lines, idx) => {
             remoteSdp.media[idx] += lines;
 
@@ -2031,6 +2118,77 @@ export default class JingleSessionPC extends JingleSession {
     }
 
     /**
+     * Adds a new track to the peerconnection. This method needs to be called only when a secondary JitsiLocalTrack is
+     * being added to the peerconnection for the first time.
+     *
+     * @param {Array<JitsiLocalTrack>} localTracks - Tracks to be added to the peer connection.
+     * @returns {Promise<void>} that resolves when the track is successfully added to the peerconnection, rejected
+     * otherwise.
+     */
+    addTracks(localTracks = null) {
+        if (!FeatureFlags.isMultiStreamSupportEnabled()
+            || !localTracks?.length
+            || localTracks.find(track => track.getType() !== MediaType.VIDEO)) {
+            return Promise.reject(new Error('Multiple tracks of the given media type are not supported'));
+        }
+
+        const replaceTracks = [];
+        const workFunction = finishedCallback => {
+            const oldLocalSDP = new SDP(this.peerconnection.localDescription.sdp);
+            const remoteSdp = new SDP(this.peerconnection.peerconnection.remoteDescription.sdp);
+
+            // Add transceivers by adding a new mline in the remote description for each track.
+            for (const track of localTracks) {
+                remoteSdp.addMlineForNewLocalSource(track.getType());
+            }
+
+            const remoteDescription = new RTCSessionDescription({
+                type: 'offer',
+                sdp: remoteSdp.raw
+            });
+
+            // Always initiate a responder renegotiate since the new m-line is added to remote SDP.
+            this._responderRenegotiate(remoteDescription)
+                .then(() => {
+                    // Replace the tracks on the newly generated transceivers.
+                    for (const track of localTracks) {
+                        replaceTracks.push(this.peerconnection.replaceTrack(null, track));
+                    }
+
+                    return Promise.all(replaceTracks);
+                })
+
+                // Trigger a renegotiation here since renegotiations are suppressed at TPC.replaceTrack for screenshare
+                // tracks. This is done here so that presence for screenshare tracks is sent before signaling.
+                .then(() => this._renegotiate())
+                .then(() => {
+                    const newLocalSDP = new SDP(this.peerconnection.localDescription.sdp);
+
+                    // Signal the new sources to the peer.
+                    this.notifyMySSRCUpdate(oldLocalSDP, newLocalSDP);
+                    finishedCallback();
+                })
+                .catch(error => finishedCallback(error));
+        };
+
+        return new Promise((resolve, reject) => {
+            logger.debug(`${this} Queued renegotiation after addTrack`);
+
+            this.modificationQueue.push(
+                workFunction,
+                error => {
+                    if (error) {
+                        logger.error(`${this} renegotiation after addTrack error`, error);
+                        reject(error);
+                    } else {
+                        logger.debug(`${this} renegotiation after addTrack executed - OK`);
+                        resolve();
+                    }
+                });
+        });
+    }
+
+    /**
      * Replaces <tt>oldTrack</tt> with <tt>newTrack</tt> and performs a single
      * offer/answer cycle after both operations are done. Either
      * <tt>oldTrack</tt> or <tt>newTrack</tt> can be null; replacing a valid
@@ -2101,11 +2259,19 @@ export default class JingleSessionPC extends JingleSession {
                     }
 
                     return promise.then(() => {
+                        // Set the source name of the new track.
+                        if (FeatureFlags.isSourceNameSignalingEnabled()
+                            && oldTrack
+                            && newTrack
+                            && oldTrack.isVideoTrack()) {
+                            newTrack.setSourceName(oldTrack.getSourceName());
+                        }
+
                         if (newTrack?.isVideoTrack()) {
                             logger.debug(`${this} replaceTrack worker: configuring video stream`);
 
                             // Configure the video encodings after the track is replaced.
-                            return this.peerconnection.configureSenderVideoEncodings();
+                            return this.peerconnection.configureSenderVideoEncodings(newTrack);
                         }
                     });
                 })
@@ -2253,7 +2419,7 @@ export default class JingleSessionPC extends JingleSession {
                 // Configure the video encodings after the track is unmuted. If the user joins the call muted and
                 // unmutes it the first time, all the parameters need to be configured.
                 if (track.isVideoTrack()) {
-                    return this.peerconnection.configureSenderVideoEncodings();
+                    return this.peerconnection.configureSenderVideoEncodings(track);
                 }
             });
     }
@@ -2428,32 +2594,31 @@ export default class JingleSessionPC extends JingleSession {
      * @see {@link _localVideoActive}
      */
     modifyContents(jingleContents) {
-        const newVideoSenders
-            = JingleSessionPC.parseVideoSenders(jingleContents);
-        const newMaxFrameHeight
-            = JingleSessionPC.parseMaxFrameHeight(jingleContents);
+        const newVideoSenders = JingleSessionPC.parseVideoSenders(jingleContents);
+        const newMaxFrameHeight = JingleSessionPC.parseMaxFrameHeight(jingleContents);
+        const sourceMaxFrameHeights = JingleSessionPC.parseSourceMaxFrameHeight(jingleContents);
 
         // frame height is optional in our content-modify protocol
         if (newMaxFrameHeight) {
             logger.info(`${this} received remote max frame height: ${newMaxFrameHeight}`);
             this.remoteRecvMaxFrameHeight = newMaxFrameHeight;
-            this.eventEmitter.emit(
-                MediaSessionEvents.REMOTE_VIDEO_CONSTRAINTS_CHANGED, this);
+            this.eventEmitter.emit(MediaSessionEvents.REMOTE_VIDEO_CONSTRAINTS_CHANGED, this);
+        }
+
+        if (sourceMaxFrameHeights) {
+            this.remoteSourceMaxFrameHeights = sourceMaxFrameHeights;
+            this.eventEmitter.emit(MediaSessionEvents.REMOTE_SOURCE_CONSTRAINTS_CHANGED, this, sourceMaxFrameHeights);
         }
 
         if (newVideoSenders === null) {
-            logger.error(
-                `${this} - failed to parse video "senders" attribute in`
-                    + '"content-modify" action');
+            logger.error(`${this} - failed to parse video "senders" attribute in "content-modify" action`);
 
             return;
         }
 
         const workFunction = finishedCallback => {
-            if (this._assertNotEnded('content-modify')
-                    && this._modifyRemoteVideoActive(newVideoSenders)) {
-                // Will do the sRD/sLD cycle to update SDPs and adjust
-                // the media direction
+            if (this._assertNotEnded() && this._modifyRemoteVideoActive(newVideoSenders)) {
+                // Will do the sRD/sLD cycle to update SDPs and adjust the media direction.
                 this._renegotiate()
                     .then(finishedCallback, finishedCallback /* (error) */);
             } else {
@@ -2495,8 +2660,7 @@ export default class JingleSessionPC extends JingleSession {
             this._remoteVideoActive = isRemoteVideoActive;
         }
 
-        return this.peerconnection.setVideoTransferActive(
-            this._localVideoActive && this._remoteVideoActive);
+        return this.peerconnection.setVideoTransferActive(this._localVideoActive && this._remoteVideoActive);
     }
 
     /**
@@ -2557,17 +2721,18 @@ export default class JingleSessionPC extends JingleSession {
                 sid: this.sid
             }
             );
-        const removedAnySSRCs = sdpDiffer.toJingle(remove);
+
+        sdpDiffer.toJingle(remove);
 
         // context a common object for one run of ssrc update (source-add and source-remove) so we can match them if we
         // need to
         const ctx = {};
+        const removedSsrcInfo = getSignaledSourceInfo(sdpDiffer);
 
-        if (removedAnySSRCs) {
-            const sourceInfo = getSignaledSourceInfo(sdpDiffer);
-
+        if (removedSsrcInfo.ssrcs.length) {
             // Log only the SSRCs instead of the full IQ.
-            logger.info(`${this} Sending source-remove for ${sourceInfo.mediaType} ssrcs=${sourceInfo.ssrcs}`);
+            logger.info(`${this} Sending source-remove for ${removedSsrcInfo.mediaType}`
+                + ` ssrcs=${removedSsrcInfo.ssrcs}`);
             this.connection.sendIQ(
                 remove,
                 () => {
@@ -2591,20 +2756,19 @@ export default class JingleSessionPC extends JingleSession {
             }
             );
 
-        const containsNewSSRCs = sdpDiffer.toJingle(add);
+        sdpDiffer.toJingle(add);
+        const addedSsrcInfo = getSignaledSourceInfo(sdpDiffer);
 
-        if (containsNewSSRCs) {
-            const sourceInfo = getSignaledSourceInfo(sdpDiffer);
-
+        if (addedSsrcInfo.ssrcs.length) {
             // Log only the SSRCs instead of the full IQ.
-            logger.info(`${this} Sending source-add for ${sourceInfo.mediaType} ssrcs=${sourceInfo.ssrcs}`);
+            logger.info(`${this} Sending source-add for ${addedSsrcInfo.mediaType} ssrcs=${addedSsrcInfo.ssrcs}`);
             this.connection.sendIQ(
                 add,
                 () => {
                     this.room.eventEmitter.emit(XMPPEvents.SOURCE_ADD, this, ctx);
                 },
                 this.newJingleErrorHandler(add, error => {
-                    this.room.eventEmitter.emit(XMPPEvents.SOURCE_ADD_ERROR, this, error, sourceInfo.mediaType, ctx);
+                    this.room.eventEmitter.emit(XMPPEvents.SOURCE_ADD_ERROR, this, error, addedSsrcInfo.mediaType, ctx);
                 }),
                 IQ_TIMEOUT);
         }
