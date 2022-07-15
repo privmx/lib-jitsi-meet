@@ -32,14 +32,12 @@
     "strophejs-plugin-disco": "0.0.2",
     "strophejs-plugin-stream-management": "https://git@github.com/jitsi/strophejs-plugin-stream-management#001cf02bef2357234e1ac5d163611b4d60bf2b6a",
     "uuid": "8.1.0",
-    "wasm-check": "^2.0.1",
     "webrtc-adapter": "8.0.0"
   },
   "devDependencies": {
     "@babel/core": "7.16.0",
     "@babel/eslint-parser": "7.16.0",
     "@babel/preset-env": "7.16.0",
-    "@babel/preset-flow": "^7.16.0",
     "@babel/preset-typescript": "7.16.7",
     "@jitsi/eslint-config": "4.0.0",
     "@types/async": "3.2.12",

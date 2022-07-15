@@ -18,10 +18,19 @@ const KEYRING_SIZE = 16;
 //
 // For audio (where frame.type is not set) we do not encrypt the opus TOC byte:
 //   https://tools.ietf.org/html/rfc6716#section-3.1
-const UNENCRYPTED_BYTES = {
+const UNENCRYPTED_BYTES_VP8 = {
     key: 10,
     delta: 3,
     undefined: 1 // frame.type is not set on audio
+};
+const UNENCRYPTED_BYTES_H264 = {
+    key: 32,
+    delta: 5,
+    undefined: 1 // frame.type is not set on audio
+};
+const UNENCRYPTED_BYTES = {
+    vp8: UNENCRYPTED_BYTES_VP8,
+    h264: UNENCRYPTED_BYTES_H264,
 };
 const ENCRYPTION_ALGORITHM = 'AES-GCM';
 
@@ -39,7 +48,7 @@ export class Context {
     /**
      * @param {Object} options
      */
-    constructor({ sharedKey = false } = {}) {
+    constructor({ sharedKey = false, codec = 'VP8', disallowUnencryptedFrames = false } = {}) {
         // An array (ring) of keys that we use for sending and receiving.
         this._cryptoKeyRing = new Array(KEYRING_SIZE);
 
@@ -49,6 +58,16 @@ export class Context {
         this._sendCounts = new Map();
 
         this._sharedKey = sharedKey;
+        
+        codec = (codec ? codec : 'vp8').toLowerCase();
+        if (!UNENCRYPTED_BYTES[codec]) {
+            codec = 'vp8';
+        }
+        this._codec = codec;
+        console.log(`E2EE Context: using codec "${codec}"`);
+        
+        this.disallowUnencryptedFrames  = disallowUnencryptedFrames;
+        console.log(`E2EE Context: disallowUnencryptedFrames = "${disallowUnencryptedFrames ? 'true' : 'false'}"`);
     }
 
     /**
@@ -119,7 +138,7 @@ export class Context {
             const iv = this._makeIV(encodedFrame.getMetadata().synchronizationSource, encodedFrame.timestamp);
 
             // Thіs is not encrypted and contains the VP8 payload descriptor or the Opus TOC byte.
-            const frameHeader = new Uint8Array(encodedFrame.data, 0, UNENCRYPTED_BYTES[encodedFrame.type]);
+            const frameHeader = new Uint8Array(encodedFrame.data, 0, UNENCRYPTED_BYTES[this._codec][encodedFrame.type]);
 
             // Frame trailer contains the R|IV_LENGTH and key index
             const frameTrailer = new Uint8Array(2);
@@ -140,7 +159,7 @@ export class Context {
                 iv,
                 additionalData: new Uint8Array(encodedFrame.data, 0, frameHeader.byteLength)
             }, this._cryptoKeyRing[keyIndex].encryptionKey, new Uint8Array(encodedFrame.data,
-                UNENCRYPTED_BYTES[encodedFrame.type]))
+                UNENCRYPTED_BYTES[this._codec][encodedFrame.type]))
             .then(cipherText => {
                 const newData = new ArrayBuffer(frameHeader.byteLength + cipherText.byteLength
                     + iv.byteLength + frameTrailer.byteLength);
@@ -170,7 +189,9 @@ export class Context {
          * This will send unencrypted data (only protected by DTLS transport encryption) when no key is configured.
          * This is ok for demo purposes but should not be done once this becomes more relied upon.
          */
-        controller.enqueue(encodedFrame);
+        if (!this.disallowUnencryptedFrames) {
+            controller.enqueue(encodedFrame);
+        }
     }
 
     /**
@@ -225,7 +246,7 @@ export class Context {
         // ---------+-------------------------+-+---------+----
 
         try {
-            const frameHeader = new Uint8Array(encodedFrame.data, 0, UNENCRYPTED_BYTES[encodedFrame.type]);
+            const frameHeader = new Uint8Array(encodedFrame.data, 0, UNENCRYPTED_BYTES[this._codec][encodedFrame.type]);
             const frameTrailer = new Uint8Array(encodedFrame.data, encodedFrame.data.byteLength - 2, 2);
 
             const ivLength = frameTrailer[0];

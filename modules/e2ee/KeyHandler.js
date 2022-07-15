@@ -23,7 +23,9 @@ export class KeyHandler extends Listenable {
         super();
 
         this.conference = conference;
-        this.e2eeCtx = new E2EEContext(options);
+        const codec = (conference.options && conference.options.config && conference.options.config.videoQuality && conference.options.config.videoQuality.preferredCodec) ? conference.options.config.videoQuality.preferredCodec : 'vp8';
+        const disallowUnencryptedFrames = (conference.options && conference.options.config) ? conference.options.config.disallowUnencryptedFrames : false;
+        this.e2eeCtx = new E2EEContext({ ...options, codec, disallowUnencryptedFrames });
 
         this.enabled = false;
         this._enabling = undefined;

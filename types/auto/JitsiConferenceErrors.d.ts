@@ -32,6 +32,10 @@ export declare enum JitsiConferenceErrors {
      */
     CONFERENCE_RESTARTED = "conference.restarted",
     /**
+     * Indicates that the client doesn't suport End-to-End Encryption.
+     */
+    E2EE_NOT_SUPPORTED = "conference.e2eeNotSupported",
+    /**
      * Indicates that a connection error is due to not allowed,
      * occurred when trying to join a conference.
      */
@@ -95,6 +99,7 @@ export declare const CONFERENCE_DESTROYED = JitsiConferenceErrors.CONFERENCE_DES
 export declare const CONFERENCE_MAX_USERS = JitsiConferenceErrors.CONFERENCE_MAX_USERS;
 export declare const CONNECTION_ERROR = JitsiConferenceErrors.CONNECTION_ERROR;
 export declare const CONFERENCE_RESTARTED = JitsiConferenceErrors.CONFERENCE_RESTARTED;
+export declare const E2EE_NOT_SUPPORTED = JitsiConferenceErrors.E2EE_NOT_SUPPORTED;
 export declare const NOT_ALLOWED_ERROR = JitsiConferenceErrors.NOT_ALLOWED_ERROR;
 export declare const MEMBERS_ONLY_ERROR = JitsiConferenceErrors.MEMBERS_ONLY_ERROR;
 export declare const CONFERENCE_ACCESS_DENIED = JitsiConferenceErrors.CONFERENCE_ACCESS_DENIED;

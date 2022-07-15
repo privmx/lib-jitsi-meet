@@ -528,9 +528,7 @@ export class OlmAdapter extends Listenable {
                 const d = this._reqs.get(msg.data.uuid);
 
                 this._reqs.delete(msg.data.uuid);
-                if (d) {
-                    d.resolve();
-                }
+                d.resolve();
             } else {
                 logger.debug(`Received key info ack message from ${pId} but we have no session for them!`);
 

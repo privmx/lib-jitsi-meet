@@ -25,8 +25,7 @@ export default class E2EEcontext {
      * Build a new E2EE context instance, which will be used in a given conference.
      * @param {boolean} [options.sharedKey] - whether there is a uniques key shared amoung all participants.
      */
-    constructor({ sharedKey } = {}) {
-        console.log("E2EECONTEXT~!!!!!!!!!!!!", {sharedKey});
+    constructor({ sharedKey, codec, disallowUnencryptedFrames } = {}) {
         // Determine the URL for the worker script. Relative URLs are relative to
         // the entry point, not the script that launches the worker.
         let baseUrl = '';
@@ -58,7 +57,9 @@ export default class E2EEcontext {
 
         this._worker.postMessage({
             operation: 'initialize',
-            sharedKey
+            sharedKey,
+            codec,
+            disallowUnencryptedFrames
         });
     }
 

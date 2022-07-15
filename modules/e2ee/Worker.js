@@ -8,6 +8,10 @@ import { Context } from './Context';
 const contexts = new Map(); // Map participant id => context
 
 let sharedContext;
+let options = {
+    codec: 'vp8',
+    disallowUnencryptedFrames: false,
+};
 
 /**
  * Retrieves the participant {@code Context}, creating it if necessary.
@@ -21,7 +25,10 @@ function getParticipantContext(participantId) {
     }
 
     if (!contexts.has(participantId)) {
-        contexts.set(participantId, new Context());
+        contexts.set(participantId, new Context({
+            codec: options.codec,
+            disallowUnencryptedFrames: options.disallowUnencryptedFrames,
+        }));
     }
 
     return contexts.get(participantId);
@@ -54,10 +61,12 @@ onmessage = async event => {
     const { operation } = event.data;
 
     if (operation === 'initialize') {
-        const { sharedKey } = event.data;
+        const { sharedKey, codec, disallowUnencryptedFrames } = event.data;
+        options.codec = codec;
+        options.disallowUnencryptedFrames = disallowUnencryptedFrames;
 
         if (sharedKey) {
-            sharedContext = new Context({ sharedKey });
+            sharedContext = new Context({ sharedKey, codec, disallowUnencryptedFrames });
         }
     } else if (operation === 'encode' || operation === 'decode') {
         const { readableStream, writableStream, participantId } = event.data;

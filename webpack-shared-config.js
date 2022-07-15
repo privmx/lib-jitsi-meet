@@ -51,7 +51,6 @@ module.exports = (minimize, analyzeBundle) => {
                                 }
                             }
                         ],
-                        require.resolve('@babel/preset-flow'),
                         '@babel/preset-typescript'
                     ]
                 },
@@ -86,15 +85,6 @@ module.exports = (minimize, analyzeBundle) => {
                 && new ProvidePlugin({
                     process: require.resolve('process/browser')
                 })
-        ].filter(Boolean),
-        resolve: {
-            fallback: {
-                // Provide some empty Node modules (required by AtlasKit, olm).
-                crypto: false,
-                fs: false,
-                path: false,
-                process: false
-            }
-        }
+        ].filter(Boolean)
     };
 };

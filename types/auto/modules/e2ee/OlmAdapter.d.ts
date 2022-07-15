@@ -48,6 +48,23 @@ export class OlmAdapter extends Listenable {
      */
     updateKey(key: Uint8Array | boolean): Promise<number>;
     /**
+     * Distributes current key to specified participants by sending a key-info message.
+     *
+     * @param {JitsiParticipant[]} participants - Participants to send key info to.
+     * @returns {Promise<{ succeededParticipants: JitsiParticipant[], failedParticipants: JitsiParticipant[] }>}
+     */
+    _distributeKeyToParticipants(participants: any[]): Promise<{
+        succeededParticipants: any[];
+        failedParticipants: any[];
+    }>;
+    /**
+     * Distributes current key to the specified participant by sending a key-info message.
+     *
+     * @param {JitsiParticipant} participant - Participant to send key info to.
+     * @returns {Promise<void>}
+     */
+    _distributeKeyToParticipant(participant: any): Promise<void>;
+    /**
      * Updates the current participant key.
      * @param {Uint8Array|boolean} key - The new key.
      * @returns {number}
@@ -152,6 +169,19 @@ export class OlmAdapter extends Listenable {
      * @private
      */
     private _sendSessionInit;
+    _hasKeyDistributionConfig(): boolean;
+    /**
+     * Returns configured number of extra key distribution attempts.
+     *
+     * @returns {number}
+     */
+    _getKeyDistributionNumberOfExtraAttempts(): number;
+    /**
+     * Returns whether waiting for pending sessions to resolve before distributing key is set to true.
+     *
+     * @returns {boolean}
+     */
+    _getKeyDistributionWaitForPendingSessionUuid(): boolean;
 }
 export namespace OlmAdapter {
     export { OlmAdapterEvents as events };

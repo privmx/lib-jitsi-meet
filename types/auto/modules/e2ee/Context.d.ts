@@ -6,11 +6,13 @@ export class Context {
     /**
      * @param {Object} options
      */
-    constructor({ sharedKey }?: any);
+    constructor({ sharedKey, codec, disallowUnencryptedFrames }?: any);
     _cryptoKeyRing: any[];
     _currentKeyIndex: number;
     _sendCounts: Map<any, any>;
     _sharedKey: any;
+    _codec: any;
+    disallowUnencryptedFrames: any;
     /**
      * Derives the different subkeys and starts using them for encryption or
      * decryption.
