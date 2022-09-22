@@ -13,13 +13,14 @@ class FeatureFlags {
      *
      * @param {boolean} flags.runInLiteMode - Enables lite mode for testing to disable media decoding.
      * @param {boolean} flags.sourceNameSignaling - Enables source names in the signaling.
+     * @param {boolean} flags.receiveMultipleVideoStreams - Signal support for receiving multiple video streams.
      */
     init(flags) {
+        this._receiveMultipleVideoStreams = flags.receiveMultipleVideoStreams ?? true;
         this._runInLiteMode = Boolean(flags.runInLiteMode);
-
-        this._sourceNameSignaling = Boolean(flags.sourceNameSignaling);
-        this._sendMultipleVideoStreams = Boolean(flags.sendMultipleVideoStreams);
-        this._ssrcRewriting = Boolean(flags.ssrcRewritingOnBridgeSupported);
+        this._sendMultipleVideoStreams = flags.sendMultipleVideoStreams ?? true;
+        this._sourceNameSignaling = flags.sourceNameSignaling ?? true;
+        this._ssrcRewriting = Boolean(flags.ssrcRewritingEnabled);
 
         // For Chromium, check if Unified plan is enabled.
         this._usesUnifiedPlan = browser.supportsUnifiedPlan()
@@ -27,7 +28,6 @@ class FeatureFlags {
 
         logger.info(`Source name signaling: ${this._sourceNameSignaling},`
             + ` Send multiple video streams: ${this._sendMultipleVideoStreams},`
-            + ` SSRC rewriting supported: ${this._ssrcRewriting},`
             + ` uses Unified plan: ${this._usesUnifiedPlan}`);
     }
 
@@ -38,6 +38,15 @@ class FeatureFlags {
      */
     isMultiStreamSupportEnabled() {
         return this._sourceNameSignaling && this._sendMultipleVideoStreams && this._usesUnifiedPlan;
+    }
+
+    /**
+     * Checks if receiving multiple video streams is supported.
+     *
+     * @returns {boolean}
+     */
+    isReceiveMultipleVideoStreamsSupported() {
+        return this._receiveMultipleVideoStreams;
     }
 
     /**

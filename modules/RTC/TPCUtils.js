@@ -297,8 +297,8 @@ export class TPCUtils {
             // b/w and cpu cases, especially on the low end machines. Suspending the low resolution streams ensures
             // that the highest resolution stream is available always. Safari is an exception here since it does not
             // send the desktop stream at all if only the high resolution stream is enabled.
-            if (this.pc.isSharingLowFpsScreen()
-                && localVideoTrack.getVideoType() === VideoType.DESKTOP
+            if (localVideoTrack.getVideoType() === VideoType.DESKTOP
+                && this.pc._capScreenshareBitrate
                 && this.pc.usesUnifiedPlan()
                 && !browser.isWebKitBased()
                 && this.localStreamEncodingsConfig[idx].scaleResolutionDownBy !== HD_SCALE_FACTOR) {
@@ -323,10 +323,12 @@ export class TPCUtils {
         const desktopShareBitrate = this.pc.options?.videoQuality?.desktopBitrate || DESKTOP_SHARE_RATE;
         const presenterEnabled = localVideoTrack._originalStream
             && localVideoTrack._originalStream.id !== localVideoTrack.getStreamId();
-
+        const lowFpsScreenshare = localVideoTrack.getVideoType() === VideoType.DESKTOP
+            && this.pc._capScreenshareBitrate
+            && !browser.isWebKitBased();
         const encodingsBitrates = this.localStreamEncodingsConfig
         .map(encoding => {
-            const bitrate = this.pc.isSharingLowFpsScreen() && !browser.isWebKitBased()
+            const bitrate = lowFpsScreenshare
 
                 // For low fps screensharing, set a max bitrate of 500 Kbps when presenter is not turned on, 2500 Kbps
                 // otherwise.
@@ -374,7 +376,10 @@ export class TPCUtils {
             transceiver = this.pc.peerconnection.getTransceivers().find(
                 t => t.receiver.track.kind === mediaType
                 && t.direction === MediaDirection.RECVONLY
-                && t.currentDirection === MediaDirection.INACTIVE);
+
+                // Re-use any existing recvonly transceiver (if available) for p2p case.
+                && ((this.pc.isP2P && t.currentDirection === MediaDirection.RECVONLY)
+                    || (t.currentDirection === MediaDirection.INACTIVE && !t.stopped)));
 
         // For mute/unmute operations, find the transceiver based on the track index in the source name if present,
         // otherwise it is assumed to be the first local track that was added to the peerconnection.
@@ -385,14 +390,20 @@ export class TPCUtils {
             if (sourceName) {
                 const trackIndex = Number(sourceName.split('-')[1].substring(1));
 
-                if (trackIndex) {
+                if (this.pc.isP2P) {
                     transceiver = this.pc.peerconnection.getTransceivers()
-                        .filter(t => t.receiver.track.kind === mediaType
-                            && t.direction !== MediaDirection.RECVONLY)[trackIndex];
+                        .filter(t => t.receiver.track.kind === mediaType)[trackIndex];
+                } else if (oldTrack) {
+                    const transceiverMid = this.pc._localTrackTransceiverMids.get(oldTrack.rtcId);
+
+                    transceiver = this.pc.peerconnection.getTransceivers().find(t => t.mid === transceiverMid);
+                } else if (trackIndex) {
+                    transceiver = this.pc.peerconnection.getTransceivers()
+                            .filter(t => t.receiver.track.kind === mediaType
+                                && t.direction !== MediaDirection.RECVONLY)[trackIndex];
                 }
             }
         }
-
         if (!transceiver) {
             return Promise.reject(new Error('replace track failed'));
         }
@@ -448,14 +459,13 @@ export class TPCUtils {
     setMediaTransferActive(mediaType, active) {
         const transceivers = this.pc.peerconnection.getTransceivers()
             .filter(t => t.receiver && t.receiver.track && t.receiver.track.kind === mediaType);
-        const localTracks = this.pc.getLocalTracks(mediaType);
 
         logger.info(`${this.pc} ${active ? 'Enabling' : 'Suspending'} ${mediaType} media transfer.`);
-        transceivers.forEach((transceiver, idx) => {
+        transceivers.forEach(transceiver => {
             if (active) {
-                // The first transceiver is for the local track and only this one can be set to 'sendrecv'.
-                // When multi-stream is enabled, there can be multiple transceivers with outbound streams.
-                if (idx < localTracks.length) {
+                const localTrackMids = Array.from(this.pc._localTrackTransceiverMids);
+
+                if (localTrackMids.find(mids => mids[1] === transceiver.mid)) {
                     transceiver.direction = MediaDirection.SENDRECV;
                 } else {
                     transceiver.direction = MediaDirection.RECVONLY;

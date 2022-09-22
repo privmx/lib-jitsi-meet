@@ -9,11 +9,13 @@ declare class FeatureFlags {
      *
      * @param {boolean} flags.runInLiteMode - Enables lite mode for testing to disable media decoding.
      * @param {boolean} flags.sourceNameSignaling - Enables source names in the signaling.
+     * @param {boolean} flags.receiveMultipleVideoStreams - Signal support for receiving multiple video streams.
      */
     init(flags: any): void;
+    _receiveMultipleVideoStreams: any;
     _runInLiteMode: boolean;
-    _sourceNameSignaling: boolean;
-    _sendMultipleVideoStreams: boolean;
+    _sendMultipleVideoStreams: any;
+    _sourceNameSignaling: any;
     _ssrcRewriting: boolean;
     _usesUnifiedPlan: any;
     /**
@@ -22,6 +24,12 @@ declare class FeatureFlags {
      * @returns {boolean}
      */
     isMultiStreamSupportEnabled(): boolean;
+    /**
+     * Checks if receiving multiple video streams is supported.
+     *
+     * @returns {boolean}
+     */
+    isReceiveMultipleVideoStreamsSupported(): boolean;
     /**
      * Checks if the run in lite mode is enabled.
      * This will cause any media to be received and not decoded. (Directions are inactive and no ssrc and ssrc-groups

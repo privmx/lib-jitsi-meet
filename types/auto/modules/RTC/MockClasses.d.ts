@@ -30,6 +30,12 @@ export class MockPeerConnection {
      */
     createAnswer(): Promise<any>;
     /**
+     * {@link TraceablePeerConnection.processLocalSdpForTransceiverInfo}.
+     *
+     * @returns {void}
+     */
+    processLocalSdpForTransceiverInfo(): void;
+    /**
      * {@link TraceablePeerConnection.setLocalDescription}.
      *
      * @returns {Promise<void>}
@@ -53,6 +59,10 @@ export class MockPeerConnection {
      * {@link TraceablePeerConnection.usesUnifiedPlan}.
      */
     usesUnifiedPlan(): boolean;
+    /**
+     * {@link TraceablePeerConnection.getLocalVideoTracks}.
+     */
+    getLocalVideoTracks(): any[];
 }
 /**
  * Mock {@link RTC} - add things as needed, but only things useful for all tests.

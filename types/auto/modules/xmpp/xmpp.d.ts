@@ -105,6 +105,7 @@ export default class XMPP extends Listenable {
      */
     private _processDiscoInfoIdentities;
     avModerationComponentAddress: any;
+    endConferenceComponentAddress: any;
     speakerStatsComponentAddress: any;
     conferenceDurationComponentAddress: any;
     lobbySupported: boolean;
@@ -237,8 +238,9 @@ export default class XMPP extends Listenable {
      * Notifies speaker stats component if available that we are the new
      * dominant speaker in the conference.
      * @param {String} roomJid - The room jid where the speaker event occurred.
+     * @param {boolean} silence - Whether the dominant speaker is silent or not.
      */
-    sendDominantSpeakerEvent(roomJid: string): void;
+    sendDominantSpeakerEvent(roomJid: string, silence: boolean): void;
     /**
      * Sends face expressions to speaker stats component.
      * @param {String} roomJid - The room jid where the speaker event occurred.

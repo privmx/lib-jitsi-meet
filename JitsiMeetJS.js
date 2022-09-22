@@ -146,15 +146,16 @@ export default _mergeNamespaceAndModule({
     init(options = {}) {
         Settings.init(options.externalStorage);
         Statistics.init(options);
+        const flags = options.flags || {};
 
         // Multi-stream is supported only on endpoints running in Unified plan mode and the flag to disable unified
         // plan also needs to be taken into consideration.
-        if (typeof options.enableUnifiedOnChrome !== 'undefined' && options.flags) {
-            options.flags.enableUnifiedOnChrome = options.enableUnifiedOnChrome;
+        if (typeof options.enableUnifiedOnChrome !== 'undefined') {
+            flags.enableUnifiedOnChrome = options.enableUnifiedOnChrome;
         }
 
         // Configure the feature flags.
-        FeatureFlags.init(options.flags || { });
+        FeatureFlags.init(flags);
 
         // Initialize global window.connectionTimes
         // FIXME do not use 'window'
@@ -330,16 +331,10 @@ export default _mergeNamespaceAndModule({
                 if (!RTC.options.disableAudioLevels) {
                     for (let i = 0; i < tracks.length; i++) {
                         const track = tracks[i];
-                        const mStream = track.getOriginalStream();
 
                         if (track.getType() === MediaType.AUDIO) {
-                            Statistics.startLocalStats(mStream,
+                            Statistics.startLocalStats(track,
                                 track.setAudioLevel.bind(track));
-                            track.addEventListener(
-                                JitsiTrackEvents.LOCAL_TRACK_STOPPED,
-                                () => {
-                                    Statistics.stopLocalStats(mStream);
-                                });
                         }
                     }
                 }

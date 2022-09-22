@@ -54,6 +54,7 @@ export default class SignalingLayer extends Listenable {
      * @param {string} owner the MUC jid of the participant for whom
      * {@link PeerMediaInfo} will be obtained.
      * @param {MediaType} mediaType the type of the media for which presence
+     * @param {SourceName} sourceName - The name of the source for which the info is to be obtained.
      * info will be obtained.
      * @return {PeerMediaInfo|null} presenceInfo an object with media presence
      * info or <tt>null</tt> either if there is no presence available for given
@@ -61,7 +62,7 @@ export default class SignalingLayer extends Listenable {
      *
      * @deprecated This method is to be replaced with getPeerSourceInfo.
      */
-    getPeerMediaInfo(owner: string, mediaType: MediaType): PeerMediaInfo | null;
+    getPeerMediaInfo(owner: string, mediaType: MediaType, sourceName: SourceName): PeerMediaInfo | null;
     /**
      * Obtains the info about a source for given name and endpoint ID.
      * @param {EndpointId} owner - The owner's endpoint ID.
@@ -75,6 +76,35 @@ export default class SignalingLayer extends Listenable {
      * @returns {SourceName | undefined} the track's source name.
      */
     getTrackSourceName(ssrc: number): SourceName | undefined;
+    /**
+     * Set an SSRC owner.
+     * @param {number} ssrc an SSRC to be owned
+     * @param {string} endpointId owner's ID (MUC nickname)
+     * @throws TypeError if <tt>ssrc</tt> is not a number
+     */
+    setSSRCOwner(ssrc: number, endpointId: string): void;
+    /**
+     * Adjusts muted status of given track.
+     *
+     * @param {SourceName} sourceName - the name of the track's source.
+     * @param {boolean} muted - the new muted status.
+     * @returns {boolean}
+     */
+    setTrackMuteStatus(sourceName: SourceName, muted: boolean): boolean;
+    /**
+     * Saves the source name for a track identified by it's ssrc.
+     * @param {number} ssrc the ssrc of the target track.
+     * @param {SourceName} sourceName the track's source name to save.
+     * @throws TypeError if <tt>ssrc</tt> is not a number
+     */
+    setTrackSourceName(ssrc: number, sourceName: SourceName): void;
+    /**
+     * Sets track's video type.
+     * @param {SourceName} sourceName - the track's source name.
+     * @param {VideoType} videoType - the new video type.
+     * @returns {boolean}
+     */
+    setTrackVideoType(sourceName: SourceName, videoType: any): boolean;
 }
 export type EndpointId = string;
 export type SourceName = string;
