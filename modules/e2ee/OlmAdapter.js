@@ -205,7 +205,14 @@ export class OlmAdapter extends Listenable {
 
         if (this._getKeyDistributionWaitForPendingSessionUuid()) {
             if (olmData.pendingSessionUuid) {
-                await this._reqs.get(olmData.pendingSessionUuid);
+                await Promise.any([
+                    this._reqs.get(olmData.pendingSessionUuid),
+                    new Promise(resolve => {
+                        setTimeout(() => {
+                            resolve();
+                        }, 5000);
+                    }),
+                ]);
             }
         }
 
@@ -718,7 +725,7 @@ export class OlmAdapter extends Listenable {
      * @returns {number}
      */
     _getKeyDistributionNumberOfExtraAttempts() {
-        if (!this._hasKeyDistributionConfig()) { return 0; }
+        if (!this._hasKeyDistributionConfig()) { return 5; }
         return this._conf.options.config.e2ee.keyDistribution.numberOfExtraAttempts;
     }
 
@@ -728,7 +735,7 @@ export class OlmAdapter extends Listenable {
      * @returns {boolean}
      */
     _getKeyDistributionWaitForPendingSessionUuid() {
-        if (!this._hasKeyDistributionConfig()) { return false; }
+        if (!this._hasKeyDistributionConfig()) { return true; }
         return this._conf.options.config.e2ee.keyDistribution.waitForPendingSessionUuid;
     }
 }
